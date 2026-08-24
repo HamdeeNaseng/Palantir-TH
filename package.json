@@ -8,10 +8,25 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "db:seed": "tsx scripts/seed.ts"
+    "check:env": "node scripts/check-environment.mjs",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "gis:fetch": "tsx scripts/fetch-boundaries.ts",
+    "gis:validate": "node scripts/validate-boundaries.mjs && tsx scripts/validate-events.ts",
+    "gis:boundaries": "npm run gis:fetch && npm run gis:validate",
+    "check": "npm run check:env && npm run gis:validate && npm run typecheck && npm run build",
+    "clean": "node scripts/clean.mjs",
+    "db:seed": "tsx scripts/seed.ts",
+    "ingest:fetch": "tsx scripts/seed.ts --fetch-only",
+    "ingest:load": "tsx scripts/seed.ts --from-archive"
   },
+  "engines": {
+    "node": "24.14.x",
+    "npm": "11.16.x"
+  },
+  "packageManager": "npm@11.16.0",
   "dependencies": {
     "@tabler/icons-react": "^3.46.0",
+    "maplibre-gl": "5.24.0",
     "mongodb": "^6.12.0",
     "next": "^15.5.4",
     "react": "^19.1.0",
@@ -19,6 +34,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
+    "@turf/simplify": "^7.4.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
