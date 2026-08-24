@@ -1,0 +1,10 @@
+| Priority | Source                         | วิธีดึง                             | ข้อมูลหลัก                                                       | บทบาทในระบบ                      | Update             |
+| -------- | ------------------------------ | ----------------------------------- | ---------------------------------------------------------------- | -------------------------------- | ------------------ |
+| **P0**   | **Deep South Watch – DSW-CID** | Dataset request / Download / Scrape | date/time, location, event type, weapon, actor/target, casualty  | **Conflict Backbone**            | Dataset / periodic |
+| **P0**   | **กอ.รมน.ภาค 4 สน.**           | Scrape ข่าว/ประกาศ                  | เวลา, จุดเกิดเหตุ, narrative, casualty, operation                | **Official Claim**               | Near real-time     |
+| **P0**   | **ศปก.ตร.สน.**                 | Scrape ข่าว/ประกาศ                  | คดี, จับกุม, หมายจับ, investigation status                       | **Law-enforcement Claim**        | Near real-time     |
+| **P0**   | **บก.สส.จชต.**                 | Scrape                              | investigation, operation, arrest/case information                | **Case enrichment**              | Near real-time     |
+| **P1**   | **ACLED**                      | REST API                            | lat/lon, event/sub-event type, actor, target, fatalities, source | **External Event Validation**    | Frequent           |
+| **P1**   | **UCDP GED**                   | REST API / CSV                      | date, lat/lon, Side A/B, deaths, conflict classification         | **Independent Conflict Dataset** | Annual             |
+| **P1**   | **UCDP Candidate**             | API / CSV                           | candidate events, location, actors, fatalities                   | **Recent External Validation**   | Monthly            |
+| **P2**   | **GTD**                        | Dataset download                    | attack type, weapon, target, group, casualty                     | **Historical Enrichment**        | Historical only    |
