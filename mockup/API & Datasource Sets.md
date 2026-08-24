@@ -9,7 +9,13 @@
 - Official news / announcements: https://fo.rtpoc.police.go.th/index.php
 
 ### บก.สส.จชต.
-- Official news / announcements: https://www.sbpinv.p9.police.go.th/
+<!--
+  Host must be sbpinv.p9.police.go.th, without "www.": the certificate's SAN
+  covers *.p9.police.go.th, a single-label wildcard that does not match
+  www.sbpinv.p9.police.go.th (TLS ERR_TLS_CERT_ALTNAME_INVALID).
+  The bare root also redirects in a loop, so address index.php directly.
+-->
+- Official news / announcements: https://sbpinv.p9.police.go.th/index.php
 
 ### ACLED
 - REST API endpoint: https://acleddata.com/api/acled/read

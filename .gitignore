@@ -15,3 +15,6 @@ next-env.d.ts
 .DS_Store
 
 *.log
+
+# Local raw-source archive (re-fetchable, can be large)
+data/raw/
