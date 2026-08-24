@@ -105,4 +105,43 @@
   .num {
     font-variant-numeric: tabular-nums;
   }
+
+  /* MapLibre popup, restyled to match the console rather than its default
+     white bubble. Class is set via the Popup `className` option. */
+  .palantir-popup .maplibregl-popup-content {
+    background: rgba(6, 13, 25, 0.96);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    border-radius: 5px;
+    padding: 8px 10px;
+    box-shadow: 0 6px 22px -8px rgba(0, 0, 0, 0.9);
+    font-family: var(--font-sans);
+    min-width: 178px;
+  }
+  .palantir-popup .maplibregl-popup-tip {
+    border-top-color: rgba(56, 189, 248, 0.45);
+    border-bottom-color: rgba(56, 189, 248, 0.45);
+  }
+  .palantir-popup .pp-title {
+    color: var(--color-ink);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-bottom: 2px;
+  }
+  .palantir-popup .pp-meta {
+    color: var(--color-ink-muted);
+    font-size: 10.5px;
+  }
+  .palantir-popup .pp-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 10.5px;
+    color: var(--color-ink-dim);
+    margin-top: 3px;
+  }
+  .palantir-popup .pp-row b {
+    color: var(--color-ink);
+    font-variant-numeric: tabular-nums;
+  }
 }
