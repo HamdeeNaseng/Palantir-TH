@@ -48,13 +48,46 @@ export interface GeoPoint {
   coordinates: [number, number];
 }
 
+/**
+ * How the coordinates were arrived at. A GPS fix and a district centroid are
+ * both "a point", but they must never be read as equally precise — clustering,
+ * hotspot detection and any distance claim have to account for this. Stored
+ * alongside the geometry rather than inferred from it.
+ */
+export type GeoPrecision =
+  | "gps" // พิกัดจากอุปกรณ์/รายงานภาคสนาม
+  | "address" // geocode ระดับที่อยู่
+  | "village" // centroid ระดับหมู่บ้าน
+  | "subdistrict" // centroid ระดับตำบล
+  | "district" // centroid ระดับอำเภอ
+  | "province" // centroid ระดับจังหวัด
+  | "unknown";
+
+/** Nominal positional error in metres, used to size uncertainty on the map. */
+export const GEO_PRECISION_RADIUS_M: Record<GeoPrecision, number> = {
+  gps: 30,
+  address: 150,
+  village: 800,
+  subdistrict: 2500,
+  district: 8000,
+  province: 25000,
+  unknown: 25000,
+};
+
 /** `source_registry` — the catalogue of every ingestion source. */
 export interface SourceRegistryDoc {
   _id: string;
   name: string;
   shortName: string;
   category: string;
-  priority: "P1" | "P2" | "P3";
+  /** Ingestion priority, taken from mockup/Conflict Data Sources.md. */
+  priority: "P0" | "P1" | "P2" | "P3";
+  /**
+   * บทบาทในระบบ — what this source is for, e.g. "Conflict Backbone",
+   * "Official Claim", "External Event Validation". Also from the catalog.
+   * Absent for sources that are not in the priority table.
+   */
+  role?: string;
   connector: { type: "REST_API" | "SCRAPER" | "DATASET"; endpoint?: string };
   schedule: { mode: "snapshot" | "incremental" | "versioned"; frequency: string };
   trust: { class: SourceTrustClass; /** 0-100, drives the reliability bars */ score: number };
@@ -67,7 +100,7 @@ export interface IngestionRunDoc {
   source_id: string;
   started_at: Date;
   finished_at: Date | null;
-  status: "success" | "partial" | "failed" | "running";
+  status: "success" | "partial" | "failed" | "running" | "skipped";
   records: {
     downloaded: number;
     new: number;
@@ -77,6 +110,21 @@ export interface IngestionRunDoc {
   };
   error?: string;
 }
+
+/** A file the source attached to a record — photo, document, scan. */
+export interface EventMedia {
+  url: string;
+  kind: "image" | "document" | "other";
+  /** Which source field it came from, e.g. "AccImage1". */
+  field: string;
+}
+
+/**
+ * Source values that have no canonical home. Kept verbatim and queryable so a
+ * source's own vocabulary is not lost just because this schema has no column
+ * for it — the full original still lives in the linked raw_record.
+ */
+export type EventAttributes = Record<string, string | number | boolean | null>;
 
 /** `event_candidates` — normalized but NOT yet a verified fact. */
 export interface EventCandidateDoc {
@@ -88,18 +136,50 @@ export interface EventCandidateDoc {
     province: string;
     provinceCode: ProvinceCode;
     district: string;
+    /** ตำบล, when the source names one. */
+    subdistrict: string | null;
+    /** Free-text place description, e.g. a landmark or road. */
+    place: string | null;
     geo: GeoPoint;
+    /** Never treat a district centroid as a GPS fix — see GeoPrecision. */
+    geo_precision: GeoPrecision;
   };
-  event: { type: EventType; title: string; summary?: string };
-  severity: SeverityLevel;
+  event: {
+    type: EventType;
+    title: string;
+    summary?: string;
+    /** The source's own category string, before mapping to EventType. */
+    rawType: string | null;
+  };
+  /**
+   * null when the source reports nothing that implies severity. Defaulting to
+   * a number would put invented figures on the map; the view layer decides how
+   * to present an unknown instead.
+   */
+  severity: SeverityLevel | null;
   verification: VerificationStatus;
   /** 0-100 — aggregate of corroborating source trust. */
   confidence: number;
-  casualties: { killed: number; injured: number };
+  /**
+   * null means the source did not report the figure — which is not the same as
+   * reporting zero. Sources like ศอ.บต. Open Data carry no casualty fields at
+   * all, and recording that as 0 would invent a fact the source never stated.
+   */
+  casualties: { killed: number | null; injured: number | null };
   actors: string[];
   targets: string[];
   /** source_registry ids that reported this same candidate. */
   corroborating_sources: string[];
+  /** Files the source attached, e.g. scene photographs. */
+  media: EventMedia[];
+  /** Everything the source said that this schema has no field for. */
+  attributes: EventAttributes;
+  /**
+   * Canonical fields this source does not supply, e.g. ["severity",
+   * "casualties"]. Lets a query distinguish "not reported" from "reported as
+   * nothing" without inspecting every field for null.
+   */
+  unreported: string[];
 }
 
 /** `canonical_events` — resolved across sources (Phase 4). */

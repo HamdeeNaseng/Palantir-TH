@@ -1,9 +1,16 @@
 import { PROVINCES } from "./geo";
+import {
+  districtsOfProvince,
+  randomPointInPolygon,
+  representativePoint,
+  type District,
+} from "./geography";
 import type {
   CaseDoc,
   CitizenReportDoc,
   EventCandidateDoc,
   EventType,
+  GeoPrecision,
   IngestionRunDoc,
   ProvinceCode,
   SeverityLevel,
@@ -126,24 +133,8 @@ const EVENT_TYPES: { type: EventType; label: string; weight: number }[] = [
   { type: "crime", label: "อาชญากรรม", weight: 4 },
 ];
 
-export const EVENT_TYPE_LABEL: Record<EventType, string> = {
-  unrest: "เหตุรุนแรง",
-  shooting: "ยิง/ประทะ",
-  raid: "ตรวจค้น/จับกุม",
-  explosion: "ลอบวางระเบิด",
-  arson: "วางเพลิง",
-  narcotics: "ยาเสพติด",
-  abduction: "ลักพาตัว",
-  crime: "อาชญากรรม",
-  gang: "กิจกรรมกลุ่ม",
-  other: "อื่น ๆ",
-};
-
-export const VERIFICATION_LABEL: Record<VerificationStatus, string> = {
-  verified: "ยืนยันแล้ว",
-  under_review: "อยู่ระหว่างตรวจสอบ",
-  unverifiable: "ยังไม่สามารถยืนยันได้",
-};
+// Display labels live in ./labels — this module is server-only (it reads
+// boundary GeoJSON from disk) and client components need the labels too.
 
 const TITLE_BY_TYPE: Record<EventType, string[]> = {
   explosion: ["ลอบวางระเบิดริมทางหลวง", "ระเบิดแสวงเครื่องใกล้จุดตรวจ", "ลอบวางระเบิดเสาไฟฟ้า"],
@@ -188,6 +179,44 @@ function weightedProvince(r: () => number) {
   return PROVINCES[0];
 }
 
+/**
+ * Precision mix, weighted toward coarse geocoding because that is what the
+ * official sources actually publish. Duplicated entries set the weight.
+ */
+const PRECISION_MIX = [
+  "gps",
+  "address",
+  "village",
+  "village",
+  "subdistrict",
+  "subdistrict",
+  "district",
+  "district",
+  "unknown",
+] as const;
+
+/**
+ * Produce a coordinate consistent with how precisely the location is known.
+ *
+ * The stored coordinate is the best available estimate, and `geo_precision`
+ * (with `GEO_PRECISION_RADIUS_M`) says how far the truth may sit from it. A
+ * district-level geocode genuinely resolves to one point for the whole
+ * district, so it returns the district's representative point; anything finer
+ * is a real position somewhere inside the district.
+ *
+ * Every branch returns a point inside the district polygon.
+ */
+function placeEvent(
+  r: () => number,
+  precision: GeoPrecision,
+  district: District,
+): [number, number] {
+  if (precision === "district" || precision === "province" || precision === "unknown") {
+    return representativePoint(district.geometry);
+  }
+  return randomPointInPolygon(r, district.geometry, district.bbox);
+}
+
 export const TOTAL_EVENTS = 1246;
 
 export function buildEvents(): EventCandidateDoc[] {
@@ -196,7 +225,9 @@ export function buildEvents(): EventCandidateDoc[] {
 
   for (let i = 0; i < TOTAL_EVENTS; i++) {
     const province = weightedProvince(r);
-    const district = pick(r, province.districts);
+    // Districts come from the DDPM boundaries, never a hand-written list, so
+    // the label and the coordinate below can never describe different places.
+    const district = pick(r, districtsOfProvince(province.ddpmCode));
     const type = weightedType(r);
 
     // Spread over ~9 years of history. Just over half the volume lands in the
@@ -206,12 +237,11 @@ export function buildEvents(): EventCandidateDoc[] {
     const daysAgo = r() < 0.55 ? Math.floor(r() * 90) : 90 + Math.floor(r() * 3210);
     const at = new Date(NOW.getTime() - daysAgo * 86400000 - Math.floor(r() * 86400000));
 
-    // Jitter around the province centroid, biased slightly inland (south) so
-    // synthetic points do not scatter into the Gulf.
-    const geo: [number, number] = [
-      province.center[0] + (r() - 0.5) * 0.34,
-      province.center[1] + (r() - 0.66) * 0.3,
-    ];
+    // Draw the precision first, because it decides how the coordinate is
+    // produced. Official datasets rarely carry a GPS fix; most events are
+    // geocoded to a village or district centroid, so the mix reflects that.
+    const precision = pick(r, PRECISION_MIX);
+    const geo = placeEvent(r, precision, district);
 
     const severity = (1 + Math.floor(r() ** 1.6 * 5)) as SeverityLevel;
     const roll = r();
@@ -243,10 +273,13 @@ export function buildEvents(): EventCandidateDoc[] {
       location: {
         province: province.name,
         provinceCode: province.code,
-        district,
+        district: district.nameTh,
+        subdistrict: null,
+        place: null,
         geo: { type: "Point", coordinates: geo },
+        geo_precision: precision,
       },
-      event: { type, title: pick(r, TITLE_BY_TYPE[type]) },
+      event: { type, title: pick(r, TITLE_BY_TYPE[type]), rawType: null },
       severity,
       verification,
       confidence,
@@ -257,6 +290,9 @@ export function buildEvents(): EventCandidateDoc[] {
       actors: [],
       targets: [],
       corroborating_sources: corroborating,
+      media: [],
+      attributes: {},
+      unreported: [],
     });
   }
 
@@ -302,7 +338,8 @@ export function buildCitizenReports(): CitizenReportDoc[] {
         reported_at: new Date(NOW.getTime() - d * 86400000 - Math.floor(r() * 86400000)),
         channel,
         provinceCode: province.code,
-        district: pick(r, province.districts),
+        // Real district names, so hotspot labels name places that exist.
+        district: pick(r, districtsOfProvince(province.ddpmCode)).nameTh,
         topic: pick(r, topics),
         became_fact: r() < 0.24,
       });
