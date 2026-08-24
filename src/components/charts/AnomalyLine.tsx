@@ -24,7 +24,9 @@ export default function AnomalyLine({
   const plotH = H - padB - padT;
   const n = daily.length;
   const step = plotW / (n - 1);
-  const max = Math.max(...daily, ...average) * 1.12;
+  // An empty real-data window is a valid state. A unit floor keeps the axis
+  // and paths finite instead of emitting NaN SVG attributes.
+  const max = Math.max(1, Math.max(...daily, ...average) * 1.12);
 
   const x = (i: number) => padL + i * step;
   const y = (v: number) => padT + plotH - (v / max) * plotH;

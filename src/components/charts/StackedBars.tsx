@@ -19,16 +19,21 @@ export default function StackedBars({
   const totals = Array.from({ length: n }, (_, i) =>
     channels.reduce((s, c) => s + c.series[i], 0),
   );
-  const max = Math.max(...totals) * 1.05;
+  // Real ingestion can legitimately produce an all-zero series. Keep a
+  // non-zero scale so SVG coordinates never become NaN in that empty state.
+  const max = Math.max(1, Math.max(...totals) * 1.05);
   const bw = (plotW / n) * 0.72;
   const gap = plotW / n;
 
   const grid = [0, 500, 1000, 1500, 2000].filter((v) => v <= max);
+  const gridTicks = [
+    ...new Set(grid.length > 1 ? grid : [0, Math.round(max / 2), Math.round(max)]),
+  ];
   const yFor = (v: number) => padT + plotH - (v / max) * plotH;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="สัดส่วนแหล่งข่าวไม่ทางการ">
-      {(grid.length > 1 ? grid : [0, Math.round(max / 2), Math.round(max)]).map((v) => (
+      {gridTicks.map((v) => (
         <g key={v}>
           <line x1={padL} x2={W - 6} y1={yFor(v)} y2={yFor(v)} stroke="rgba(56,100,150,0.14)" />
           <text x={padL - 5} y={yFor(v) + 3} textAnchor="end" fontSize="8" fill="#64809f">

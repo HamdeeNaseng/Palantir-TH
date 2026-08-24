@@ -10,7 +10,13 @@ export interface InvestigationFilters {
 }
 
 export const DEFAULT_FILTERS: InvestigationFilters = {
-  range: "30d",
+  /**
+   * The ingested sources are a historical conflict record spanning 2002 to the
+   * present, not a live feed. A 30-day default matched 2 of 10,041 events and
+   * made the dashboard look broken, so the full record is the useful starting
+   * point and narrowing is the deliberate act.
+   */
+  range: "all",
   provinces: ["pattani", "yala", "narathiwat", "songkhla"],
   eventTypes: [],
   verification: ["verified", "under_review"],
@@ -23,7 +29,7 @@ export const RANGE_OPTIONS: { value: InvestigationFilters["range"]; label: strin
   { value: "7d", label: "7 วันที่ผ่านมา" },
   { value: "30d", label: "30 วันที่ผ่านมา" },
   { value: "90d", label: "90 วันที่ผ่านมา" },
-  { value: "all", label: "กำหนดเอง" },
+  { value: "all", label: "ทั้งหมด" },
 ];
 
 export const RANGE_DAYS: Record<InvestigationFilters["range"], number | null> = {

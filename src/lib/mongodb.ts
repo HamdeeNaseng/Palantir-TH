@@ -4,8 +4,8 @@ const uri = process.env.MONGODB_URI ?? "mongodb://root:changeme@localhost:27017/
 const dbName = process.env.MONGODB_DB ?? "palantir_th";
 
 /**
- * Fail fast rather than hanging a page render for 30s when the container is down —
- * callers fall back to demo data (see src/server/investigate.ts).
+ * Fail fast rather than hanging a page render for 30s when the container is down.
+ * Callers return an explicit empty state; production never falls back to fixtures.
  */
 const clientOptions = { serverSelectionTimeoutMS: 2_000, connectTimeoutMS: 2_000 };
 

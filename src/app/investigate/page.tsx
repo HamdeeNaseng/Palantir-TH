@@ -45,7 +45,7 @@ export default async function InvestigatePage({
           <div className="grid h-full min-h-[884px] grid-cols-[minmax(0,1fr)_clamp(320px,22vw,360px)] grid-rows-[minmax(570px,1.85fr)_minmax(306px,1fr)] gap-2">
             <div className="grid min-h-0 grid-rows-[82px_268px_minmax(204px,1fr)] gap-2">
               <KpiRow kpis={data.kpis} />
-              <MapPanel markers={data.markers} heat={data.heat} />
+              <MapPanel events={data.events} />
 
               <div className="grid min-h-0 grid-cols-[1fr_1fr_1.15fr] gap-2">
                 <TrendPanel trend={data.trend} />

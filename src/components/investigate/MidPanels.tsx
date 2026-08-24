@@ -30,12 +30,12 @@ const GhostButton = ({ children }: { children: React.ReactNode }) => (
   </button>
 );
 
-/** แนวโน้มเหตุการณ์ (30 วัน) */
+/** แนวโน้มเหตุการณ์ — ช่วงเวลาและหน่วยเวลาตามตัวกรองที่เลือก */
 export function TrendPanel({ trend }: { trend: InvestigationDashboard["trend"] }) {
   return (
     <section className="panel flex flex-col">
       <PanelHead
-        title="แนวโน้มเหตุการณ์ (30 วัน)"
+        title={`แนวโน้มเหตุการณ์ (${trend.bucketLabel})`}
         action={
           <GhostButton>
             ทุกปืน
@@ -252,6 +252,23 @@ export function RecentEventsPanel({
 }
 
 function SeverityPill({ level, label }: { level: number; label: string }) {
+  // level 0 means the source reported nothing implying severity. Show that as
+  // an explicit unknown rather than as the lowest rung, which would read as
+  // "this was minor" — a claim the data does not support.
+  if (level < 1 || level > 5) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-[11px] text-ink-muted"
+        title="แหล่งข้อมูลไม่ได้ระบุระดับความรุนแรง"
+      >
+        <span className="flex h-4 w-4 items-center justify-center rounded-full border border-dashed border-ink-muted text-[9px]">
+          –
+        </span>
+        {label}
+      </span>
+    );
+  }
+
   const color = ["", "#22c55e", "#84cc16", "#f59e0b", "#f97316", "#ef4444"][level];
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color }}>

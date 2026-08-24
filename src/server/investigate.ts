@@ -1,12 +1,15 @@
 import { COLLECTIONS, getDb } from "@/lib/mongodb";
-import { EVENT_TYPE_LABEL, NOW, buildAll } from "@/lib/fixtures";
-import { PROVINCES, project } from "@/lib/geo";
+import { EVENT_TYPE_LABEL, SEVERITY_LABEL } from "@/lib/labels";
+import { PROVINCES } from "@/lib/geo";
 import { DEFAULT_FILTERS, RANGE_DAYS, type InvestigationFilters } from "@/lib/filters";
+import { EVENT_COLOR } from "@/lib/palette";
+import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
 import type {
   CaseDoc,
   CitizenReportDoc,
   EventCandidateDoc,
   EventType,
+  GeoPrecision,
   IngestionRunDoc,
   SourceRegistryDoc,
 } from "@/lib/types";
@@ -14,20 +17,27 @@ import type {
 /** Sources at or above this trust score satisfy "เฉพาะแหล่งข้อมูลที่เชื่อถือได้". */
 const TRUSTED_SCORE_FLOOR = 70;
 
+/**
+ * Drawn for events whose source reports no severity. Deliberately the middle of
+ * the scale so an unknown neither shouts nor disappears; `severity_known`
+ * carries the truth for anything that needs to tell them apart.
+ */
+const UNKNOWN_SEVERITY_FALLBACK = 3;
+let NOW = new Date();
+
 interface RawBundle {
   sources: SourceRegistryDoc[];
   events: EventCandidateDoc[];
   citizenReports: CitizenReportDoc[];
   ingestionRuns: IngestionRunDoc[];
   cases: CaseDoc[];
-  /** false when the database was unreachable and demo fixtures were used. */
+  /** False when MongoDB is unavailable. No fixture data is substituted. */
   live: boolean;
 }
 
 /**
- * Reads the document layers from MongoDB, falling back to the in-memory
- * fixtures when the container is not running. Aggregation happens in the app
- * (see below) so both paths share one implementation.
+ * Reads the document layers from MongoDB. An unavailable or unseeded database
+ * returns an empty bundle; production must never silently substitute mock data.
  */
 async function loadBundle(): Promise<RawBundle> {
   try {
@@ -40,14 +50,19 @@ async function loadBundle(): Promise<RawBundle> {
       db.collection<CaseDoc>(COLLECTIONS.cases).find({}).toArray(),
     ]);
 
-    if (events.length > 0 && sources.length > 0) {
-      return { sources, events, citizenReports, ingestionRuns, cases, live: true };
-    }
+    return { sources, events, citizenReports, ingestionRuns, cases, live: sources.length > 0 };
   } catch {
-    // Database unavailable or not seeded — fall through to fixtures.
+    // Database unavailable: preserve an honest empty state.
   }
 
-  return { ...buildAll(), live: false };
+  return {
+    sources: [],
+    events: [],
+    citizenReports: [],
+    ingestionRuns: [],
+    cases: [],
+    live: false,
+  };
 }
 
 /**
@@ -98,22 +113,35 @@ export interface KpiCard {
   ring?: number;
 }
 
-export interface MapMarker {
-  id: string;
-  x: number;
-  y: number;
-  type: EventType;
-  severity: number;
-  title: string;
-  district: string;
-  province: string;
+/**
+ * One event as a GeoJSON feature for MapLibre. Properties are flat scalars
+ * because MapLibre filter/paint expressions can only read primitives.
+ */
+export interface EventFeature {
+  type: "Feature";
+  geometry: { type: "Point"; coordinates: [number, number] };
+  properties: {
+    id: string;
+    type: EventType;
+    severity: number;
+    /** false when the source reported nothing implying severity. */
+    severity_known: boolean;
+    confidence: number;
+    /** Epoch ms — drives `["<=", ["get","ts"], t]` timeline replay. */
+    ts: number;
+    title: string;
+    district: string;
+    province: string;
+    precision: GeoPrecision;
+    /** Nominal positional error in metres, for the uncertainty layer. */
+    precision_m: number;
+    color: string;
+  };
 }
 
-export interface HeatBlob {
-  x: number;
-  y: number;
-  r: number;
-  intensity: number;
+export interface EventFeatureCollection {
+  type: "FeatureCollection";
+  features: EventFeature[];
 }
 
 export interface TrendSeries {
@@ -171,9 +199,8 @@ export interface InvestigationDashboard {
   live: boolean;
   filters: InvestigationFilters;
   kpis: KpiCard[];
-  markers: MapMarker[];
-  heat: HeatBlob[];
-  trend: { labels: string[]; series: TrendSeries[]; max: number };
+  events: EventFeatureCollection;
+  trend: { labels: string[]; series: TrendSeries[]; max: number; bucketLabel: string };
   network: { nodes: NetworkNode[]; edges: { from: string; to: string; weight: number }[] };
   sources: SourceReliabilityRow[];
   recentEvents: EventRow[];
@@ -183,8 +210,6 @@ export interface InvestigationDashboard {
 }
 
 // ----------------------------------------------------------------- aggregation
-
-const SEVERITY_LABEL = ["", "ต่ำ", "ปานกลาง", "สูง", "สูงมาก", "วิกฤต"];
 
 const TREND_GROUPS: { key: string; label: string; color: string; types: EventType[] }[] = [
   { key: "violence", label: "เหตุรุนแรง", color: "#3b82f6", types: ["unrest", "explosion", "shooting", "arson"] },
@@ -297,30 +322,84 @@ function buildKpis(matched: EventCandidateDoc[], previous: EventCandidateDoc[]):
   ];
 }
 
-function buildHeat(events: EventCandidateDoc[]): HeatBlob[] {
-  // Grid-bin the events, then emit one blob per populated cell. Cheap density
-  // estimate that reads like a heatmap once blurred in the SVG layer.
-  const cell = 0.09;
-  const bins = new Map<string, { lng: number; lat: number; n: number }>();
-  for (const e of events) {
-    const [lng, lat] = e.location.geo.coordinates;
-    const key = `${Math.round(lng / cell)}:${Math.round(lat / cell)}`;
-    const bin = bins.get(key) ?? { lng: 0, lat: 0, n: 0 };
-    bin.lng += lng;
-    bin.lat += lat;
-    bin.n += 1;
-    bins.set(key, bin);
+/** P(X >= k) for X ~ Poisson(lambda). Used to separate signal from noise. */
+function poissonUpperTail(k: number, lambda: number): number {
+  if (lambda <= 0) return k > 0 ? 0 : 1;
+  let cumulative = 0;
+  let term = Math.exp(-lambda);
+  for (let i = 0; i < k; i++) {
+    cumulative += term;
+    term *= lambda / (i + 1);
+  }
+  return Math.max(0, Math.min(1, 1 - cumulative));
+}
+
+const HOTSPOT_RECENT_DAYS = 7;
+const HOTSPOT_BASELINE_DAYS = 23;
+/** Ignore districts too sparse for the Poisson comparison to say anything. */
+const HOTSPOT_MIN_BASELINE = 10;
+const HOTSPOT_ALPHA = 0.05;
+
+/**
+ * Find districts reporting materially more than expected.
+ *
+ * The expectation is conditioned on the *national* change over the same period,
+ * not on the district's own past. That distinction matters: when reporting
+ * rises everywhere — a news cycle, a campaign, a nationwide alert — every
+ * district beats its own baseline, so "above its own baseline" would flag
+ * almost everything and mean nothing. Holding each district's share of the
+ * baseline volume constant and projecting it onto the recent total removes that
+ * common-mode movement, leaving only genuinely localised excess.
+ *
+ * Significance is a Poisson upper-tail test, so a district with a small
+ * baseline cannot top the list on a couple of extra reports.
+ *
+ * @param reports  Reports inside the analysis window.
+ * @param endMs    Instant the window ends at (the "now" of this comparison).
+ */
+function detectHotspots(reports: CitizenReportDoc[], endMs: number) {
+  const stats = new Map<string, { recent: number; before: number }>();
+  for (const r of reports) {
+    const province = PROVINCES.find((p) => p.code === r.provinceCode)?.name ?? "";
+    const key = `อ.${r.district} จ.${province}`;
+    const s = stats.get(key) ?? { recent: 0, before: 0 };
+    if (endMs - r.reported_at.getTime() <= HOTSPOT_RECENT_DAYS * 86400000) s.recent += 1;
+    else s.before += 1;
+    stats.set(key, s);
   }
 
-  const cells = [...bins.values()].filter((b) => b.n >= 2);
-  const max = Math.max(1, ...cells.map((b) => b.n));
+  const rows = [...stats.entries()];
+  const totalRecent = rows.reduce((sum, [, s]) => sum + s.recent, 0);
+  const totalBefore = rows.reduce((sum, [, s]) => sum + s.before, 0);
+  if (!totalRecent || !totalBefore) return { hotspots: [], significantCount: 0 };
 
-  return cells
-    .map((b) => {
-      const p = project([b.lng / b.n, b.lat / b.n]);
-      return { x: p.x, y: p.y, r: 3.2 + (b.n / max) * 6.5, intensity: b.n / max };
+  const scored = rows
+    .filter(([, s]) => s.before >= HOTSPOT_MIN_BASELINE)
+    .map(([label, s]) => {
+      const expected = (s.before / totalBefore) * totalRecent;
+      return {
+        label,
+        expected,
+        observed: s.recent,
+        delta: Math.round((s.recent / expected - 1) * 100),
+        p: poissonUpperTail(s.recent, expected),
+      };
     })
-    .sort((a, b) => a.intensity - b.intensity);
+    .filter((r) => r.observed > r.expected)
+    .sort((a, b) => a.p - b.p);
+
+  const significant = scored.filter((r) => r.p < HOTSPOT_ALPHA);
+
+  return {
+    // Only surface districts that clear the significance bar — an empty list is
+    // the correct answer when nothing is genuinely anomalous.
+    hotspots: significant.slice(0, 3).map((r, i) => ({
+      rank: i + 1,
+      label: r.label,
+      delta: r.delta,
+    })),
+    significantCount: significant.length,
+  };
 }
 
 function buildCitizen(reports: CitizenReportDoc[]): CitizenSignal {
@@ -361,27 +440,7 @@ function buildCitizen(reports: CitizenReportDoc[]): CitizenSignal {
     .slice(0, 5)
     .map(([t]) => `#${t}`);
 
-  // Hotspot = district whose last 7 days ran hottest against its own prior 23,
-  // compared as reports *per day* on both sides.
-  const districtStats = new Map<string, { recent: number; before: number }>();
-  for (const r of window) {
-    const province = PROVINCES.find((p) => p.code === r.provinceCode)?.name ?? "";
-    const key = `อ.${r.district} จ.${province}`;
-    const s = districtStats.get(key) ?? { recent: 0, before: 0 };
-    if (NOW.getTime() - r.reported_at.getTime() <= 7 * 86400000) s.recent += 1;
-    else s.before += 1;
-    districtStats.set(key, s);
-  }
-  const hotspots = [...districtStats.entries()]
-    .filter(([, s]) => s.before >= 10)
-    .map(([label, s]) => ({
-      label,
-      delta: Math.round((s.recent / 7 / (s.before / 23) - 1) * 100),
-    }))
-    .filter((h) => h.delta > 0)
-    .sort((a, b) => b.delta - a.delta)
-    .slice(0, 3)
-    .map((h, i) => ({ rank: i + 1, ...h }));
+  const { hotspots, significantCount } = detectHotspots(window, NOW.getTime());
 
   // Period over period: this 30-day window against the 30 before it.
   const prior = reports.filter((r) => {
@@ -398,11 +457,10 @@ function buildCitizen(reports: CitizenReportDoc[]): CitizenSignal {
   return {
     totalReports: window.length,
     changePct,
-    // Distinct district/topic pairs running above their own baseline.
-    suspiciousClusters: [...districtStats.values()].filter(
-      (s) => s.before >= 4 && s.recent / 7 > s.before / 23,
-    ).length,
-    clusterDelta: 5,
+    // Districts whose recent volume exceeds what the national trend predicts,
+    // at p < 0.05 — not merely "more than last week".
+    suspiciousClusters: significantCount,
+    clusterDelta: significantCount - detectHotspots(prior, NOW.getTime() - 30 * 86400000).significantCount,
     factConversionPct: Math.round(factRate(window)),
     factConversionDelta: Math.round(factRate(window) - factRate(prior)),
     daily,
@@ -415,53 +473,141 @@ function buildCitizen(reports: CitizenReportDoc[]): CitizenSignal {
   };
 }
 
-function buildNetwork(activeCase: CaseDoc | null) {
-  const e = activeCase?.entities ?? { people: 12, groups: 3, vehicles: 1, phones: 5, places: 3, evidence: 3 };
+/**
+ * What the events in scope are actually made of.
+ *
+ * This used to render a fixed set of counts (31 people, 8 groups, …) that were
+ * written into the source and shown regardless of the data — including when no
+ * case existed at all. Everything here is now counted from the matched events,
+ * so an empty result shows zeros rather than a plausible-looking fiction.
+ *
+ * Person/vehicle/phone entities do not exist in the ingested sources yet, so
+ * the graph reports the dimensions that do: where, who reported it, what kind,
+ * and what evidence came attached.
+ */
+/**
+ * Trend bucketed to suit the selected range.
+ *
+ * A fixed 30-day daily series was useless against this data: the ingested
+ * record spans 2002 onward, so at "ทั้งหมด" the chart showed a flat line with
+ * everything crushed into the last pixel. Short ranges stay daily; longer ones
+ * roll up to months or years so the shape of two decades is actually visible.
+ */
+function buildTrend(events: EventCandidateDoc[], range: InvestigationFilters["range"]) {
+  const times = events.map((e) => e.time.start.getTime());
+  const days = RANGE_DAYS[range];
+
+  // "ทั้งหมด" spans whatever the data spans, so derive the window from it.
+  const endMs = NOW.getTime();
+  const startMs =
+    days !== null
+      ? endMs - days * 86400000
+      : times.length
+        ? Math.min(...times)
+        : endMs - 30 * 86400000;
+  const spanDays = Math.max(1, (endMs - startMs) / 86400000);
+
+  const unit: "day" | "month" | "year" =
+    spanDays <= 120 ? "day" : spanDays <= 365 * 3 ? "month" : "year";
+
+  /** Bucket key and its display label, both derived from the same date. */
+  const keyOf = (d: Date) =>
+    unit === "day"
+      ? `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`
+      : unit === "month"
+        ? `${d.getUTCFullYear()}-${d.getUTCMonth()}`
+        : `${d.getUTCFullYear()}`;
+
+  // Build the ordered bucket list first so empty periods still appear.
+  const buckets: { key: string; label: string }[] = [];
+  const cursor = new Date(startMs);
+  if (unit === "day") cursor.setUTCHours(0, 0, 0, 0);
+  else if (unit === "month") cursor.setUTCDate(1), cursor.setUTCHours(0, 0, 0, 0);
+  else cursor.setUTCMonth(0, 1), cursor.setUTCHours(0, 0, 0, 0);
+
+  while (cursor.getTime() <= endMs && buckets.length < 400) {
+    buckets.push({
+      key: keyOf(cursor),
+      label:
+        unit === "day"
+          ? thaiShortDate(cursor)
+          : unit === "month"
+            ? `${THAI_MONTH_ABBR[cursor.getUTCMonth()]} ${String(cursor.getUTCFullYear() + 543).slice(-2)}`
+            : String(cursor.getUTCFullYear() + 543),
+      });
+    if (unit === "day") cursor.setUTCDate(cursor.getUTCDate() + 1);
+    else if (unit === "month") cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    else cursor.setUTCFullYear(cursor.getUTCFullYear() + 1);
+  }
+
+  const index = new Map(buckets.map((b, i) => [b.key, i]));
+
+  const series: TrendSeries[] = TREND_GROUPS.map((g) => {
+    const points = new Array(buckets.length).fill(0);
+    for (const e of events) {
+      if (!g.types.includes(e.event.type)) continue;
+      const i = index.get(keyOf(e.time.start));
+      if (i !== undefined) points[i] += 1;
+    }
+    return { key: g.key, label: g.label, color: g.color, points };
+  });
+
+  const max = Math.max(
+    10,
+    ...buckets.map((_, i) => series.reduce((sum, g) => sum + g.points[i], 0)),
+  );
+
+  return {
+    labels: buckets.map((b) => b.label),
+    series,
+    max,
+    bucketLabel: unit === "day" ? "รายวัน" : unit === "month" ? "รายเดือน" : "รายปี",
+  };
+}
+
+function buildNetwork(events: EventCandidateDoc[]) {
+  const distinct = (values: (string | null | undefined)[]) =>
+    new Set(values.filter((value): value is string => Boolean(value))).size;
+
+  const districts = distinct(events.map((e) => `${e.location.province}/${e.location.district}`));
+  const subdistricts = distinct(
+    events.map((e) => e.location.subdistrict && `${e.location.district}/${e.location.subdistrict}`),
+  );
+  const sources = distinct(events.flatMap((e) => e.corroborating_sources));
+  const types = distinct(events.map((e) => e.event.type));
+  const media = events.reduce((sum, e) => sum + (e.media?.length ?? 0), 0);
 
   const nodes: NetworkNode[] = [
     { id: "event", label: "เหตุการณ์", icon: "event", x: 50, y: 50, accent: "#ef4444" },
-    { id: "person", label: "บุคคล", icon: "person", count: e.people, x: 32, y: 18, accent: "#22c55e" },
-    { id: "group", label: "กลุ่ม", icon: "group", count: e.groups, x: 72, y: 18, accent: "#f59e0b" },
-    { id: "place", label: "สถานที่", icon: "place", count: e.places, x: 12, y: 52, accent: "#3b82f6" },
-    { id: "vehicle", label: "ยานพาหนะ", icon: "vehicle", count: e.vehicles, x: 88, y: 52, accent: "#a855f7" },
-    { id: "phone", label: "โทรศัพท์", icon: "phone", count: e.phones, x: 32, y: 80, accent: "#22d3ee" },
+    { id: "district", label: "อำเภอ", icon: "place", count: districts, x: 32, y: 18, accent: "#3b82f6" },
+    { id: "subdistrict", label: "ตำบล", icon: "place", count: subdistricts, x: 72, y: 18, accent: "#22c55e" },
+    { id: "source", label: "แหล่งข้อมูล", icon: "group", count: sources, x: 12, y: 52, accent: "#f59e0b" },
+    { id: "type", label: "ประเภทเหตุ", icon: "vehicle", count: types, x: 88, y: 52, accent: "#a855f7" },
+    { id: "media", label: "หลักฐานภาพ", icon: "phone", count: media, x: 32, y: 80, accent: "#22d3ee" },
   ];
 
-  const edges = [
-    { from: "person", to: "event", weight: 31 },
-    { from: "group", to: "event", weight: 8 },
-    { from: "place", to: "event", weight: 31 },
-    { from: "vehicle", to: "event", weight: 16 },
-    { from: "phone", to: "event", weight: 12 },
-  ];
-
-  return { nodes, edges };
+  return {
+    nodes,
+    edges: [
+      { from: "district", to: "event", weight: districts },
+      { from: "subdistrict", to: "event", weight: subdistricts },
+      { from: "source", to: "event", weight: sources },
+      { from: "type", to: "event", weight: types },
+      { from: "media", to: "event", weight: media },
+    ],
+  };
 }
 
 export async function getInvestigationDashboard(
   filters: InvestigationFilters = DEFAULT_FILTERS,
 ): Promise<InvestigationDashboard> {
+  NOW = new Date();
   const bundle = await loadBundle();
   const matched = applyFilters(bundle.events, bundle.sources, filters);
   const previous = applyFilters(bundle.events, bundle.sources, filters, 1);
 
-  const trendLabels = Array.from({ length: 30 }, (_, i) =>
-    thaiShortDate(new Date(NOW.getTime() - (29 - i) * 86400000)),
-  );
-  const trendWindow = matched.filter((e) => inRange(e.time.start, "30d"));
-  const series: TrendSeries[] = TREND_GROUPS.map((g) => ({
-    key: g.key,
-    label: g.label,
-    color: g.color,
-    points: dailyCounts(
-      trendWindow.filter((e) => g.types.includes(e.event.type)).map((e) => e.time.start),
-      30,
-    ),
-  }));
-  const trendMax = Math.max(
-    10,
-    ...trendLabels.map((_, i) => series.reduce((s, g) => s + g.points[i], 0)),
-  );
+  const trend = buildTrend(matched, filters.range);
+  const { labels: trendLabels, series, max: trendMax, bucketLabel } = trend;
 
   const sourceUsage = new Map<string, number>();
   for (const e of matched) {
@@ -482,22 +628,35 @@ export async function getInvestigationDashboard(
     live: bundle.live,
     filters,
     kpis: buildKpis(matched, previous),
-    markers: matched.slice(0, 140).map((e) => {
-      const p = project(e.location.geo.coordinates);
-      return {
-        id: e._id,
-        x: p.x,
-        y: p.y,
-        type: e.event.type,
-        severity: e.severity,
-        title: e.event.title,
-        district: e.location.district,
-        province: e.location.province,
-      };
-    }),
-    heat: buildHeat(matched),
-    trend: { labels: trendLabels, series, max: trendMax },
-    network: buildNetwork(bundle.cases[0] ?? null),
+    // The whole matched set goes to the client: MapLibre renders points on the
+    // GPU, so there is no reason to cap it the way a DOM-node map had to. The
+    // heatmap layer derives density itself, so no pre-binning either.
+    events: {
+      type: "FeatureCollection",
+      features: matched.map((e) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: e.location.geo.coordinates },
+        properties: {
+          id: e._id,
+          type: e.event.type,
+          // MapLibre paint expressions cannot read null, so an unreported
+          // severity is drawn at the neutral middle rather than omitted. The
+          // `severity_known` flag keeps the distinction visible to the UI.
+          severity: e.severity ?? UNKNOWN_SEVERITY_FALLBACK,
+          severity_known: e.severity !== null,
+          confidence: e.confidence,
+          ts: e.time.start.getTime(),
+          title: e.event.title,
+          district: e.location.district,
+          province: e.location.province,
+          precision: e.location.geo_precision ?? "unknown",
+          precision_m: GEO_PRECISION_RADIUS_M[e.location.geo_precision ?? "unknown"],
+          color: EVENT_COLOR[e.event.type],
+        },
+      })),
+    },
+    trend: { labels: trendLabels, series, max: trendMax, bucketLabel },
+    network: buildNetwork(matched),
     sources: [...bundle.sources]
       .sort((a, b) => b.trust.score - a.trust.score)
       .map((s) => ({
@@ -512,8 +671,8 @@ export async function getInvestigationDashboard(
       type: EVENT_TYPE_LABEL[e.event.type],
       district: e.location.district,
       province: e.location.province,
-      severity: e.severity,
-      severityLabel: SEVERITY_LABEL[e.severity],
+      severity: e.severity ?? 0,
+      severityLabel: e.severity === null ? "ไม่ระบุ" : SEVERITY_LABEL[e.severity],
       source:
         bundle.sources.find((s) => s._id === e.corroborating_sources[0])?.shortName ?? "ไม่ระบุ",
     })),

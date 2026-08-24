@@ -57,6 +57,16 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
         <span className="text-[10.5px] text-ink-muted">(30 วันล่าสุด)</span>
       </header>
 
+      {/* Zeros here would read as "we measured nothing happening", when in fact
+          no source feeds this stream yet. Say which one it is. */}
+      {citizen.totalReports === 0 && (
+        <p className="shrink-0 border-b border-[rgba(56,189,248,0.18)] bg-[rgba(56,189,248,0.06)] px-3 py-1.5 text-[10.5px] leading-snug text-ink-muted">
+          ยังไม่มี connector ป้อนข้อมูลเข้าคอลเลกชัน{" "}
+          <code className="font-mono text-ink-dim">citizen_reports</code> — ตัวเลขด้านล่างจึงเป็นศูนย์
+          เพราะไม่มีข้อมูล ไม่ใช่เพราะไม่มีรายงาน
+        </p>
+      )}
+
       <div className="grid h-[70px] shrink-0 grid-cols-4 gap-1.5 p-1.5">
         {tiles.map((t) => (
           <div
@@ -146,15 +156,26 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
           <h4 className="mb-1 text-[11.5px] font-medium text-ink">
             พื้นที่ที่รายงานเพิ่มขึ้นผิดปกติ (Hotspots)
           </h4>
-          <ol className="space-y-0.5">
-            {citizen.hotspots.map((h) => (
-              <li key={h.rank} className="flex items-center gap-2 text-[11px]">
-                <span className="num text-ink-muted">{h.rank}.</span>
-                <span className="flex-1 truncate text-ink-dim">{h.label}</span>
-                <span className="num font-medium text-danger">+{h.delta}%</span>
-              </li>
-            ))}
-          </ol>
+          {citizen.hotspots.length === 0 ? (
+            <p className="text-[10.5px] leading-snug text-ink-muted">
+              ไม่พบพื้นที่ที่สูงกว่าแนวโน้มรวมอย่างมีนัยสำคัญ
+            </p>
+          ) : (
+            <ol className="space-y-0.5">
+              {citizen.hotspots.map((h) => (
+                <li key={h.rank} className="flex items-center gap-2 text-[11px]">
+                  <span className="num text-ink-muted">{h.rank}.</span>
+                  <span className="flex-1 truncate text-ink-dim">{h.label}</span>
+                  <span
+                    className="num font-medium text-danger"
+                    title="สูงกว่าค่าที่คาดไว้หลังปรับตามแนวโน้มรวมทั้งพื้นที่แล้ว (p < 0.05)"
+                  >
+                    +{h.delta}%
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       </div>
     </section>
