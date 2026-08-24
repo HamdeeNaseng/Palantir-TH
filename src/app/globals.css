@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces — deep navy console, darkest at the page floor. */
+  --color-void: #04070e;
+  --color-abyss: #060b16;
+  --color-panel: #0a1220;
+  --color-panel-2: #0e1a2c;
+  --color-raised: #12213a;
+
+  /* Hairlines */
+  --color-line: #16273f;
+  --color-line-strong: #1e344f;
+
+  /* Text */
+  --color-ink: #e6f1ff;
+  --color-ink-dim: #9db2ce;
+  --color-ink-muted: #64809f;
+
+  /* Accents */
+  --color-cyan: #22d3ee;
+  --color-azure: #38bdf8;
+  --color-royal: #3b82f6;
+  --color-danger: #ef4444;
+  --color-flame: #f97316;
+  --color-amber: #f59e0b;
+  --color-mint: #22c55e;
+  --color-violet: #a855f7;
+
+  --font-sans: "IBM Plex Sans Thai", "Noto Sans Thai", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Thin console scrollbars so dense panels don't lose 15px to chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1e344f transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #1e344f;
+    border-radius: 99px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* The recurring bordered card that every panel in the mockup is built from. */
+  .panel {
+    background: linear-gradient(180deg, rgba(14, 26, 44, 0.72), rgba(10, 18, 32, 0.72));
+    border: 1px solid rgba(37, 66, 102, 0.55);
+    border-radius: 6px;
+    /* Panels are fixed-height in the dashboard grid; clip rather than let a
+       long table bleed over the panel below it. */
+    overflow: hidden;
+  }
+
+  .panel-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--color-ink);
+  }
+
+  /* Glow used on the highlighted citizen-signal panel. */
+  .panel-focus {
+    border-color: rgba(56, 189, 248, 0.55);
+    box-shadow:
+      0 0 0 1px rgba(56, 189, 248, 0.12),
+      0 0 28px -6px rgba(56, 189, 248, 0.35);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.6;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
