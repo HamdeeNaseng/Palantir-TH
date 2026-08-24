@@ -1,0 +1,16 @@
+services:
+  mongo:
+    image: mongo:8.0.8-noble
+    container_name: palantir-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-palantir_th}
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
