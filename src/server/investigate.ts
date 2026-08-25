@@ -382,7 +382,10 @@ export async function getInvestigationDashboard(
     // heatmap layer derives density itself, so no pre-binning either.
     events: {
       type: "FeatureCollection",
-      features: matched.map((e): EventFeature => toEventFeature(e)),
+      features: matched.flatMap((e): EventFeature[] => {
+        const feature = toEventFeature(e);
+        return feature ? [feature] : [];
+      }),
     },
     trend: { labels: trendLabels, series, max: trendMax, bucketLabel },
     network: buildNetwork(matched),

@@ -103,7 +103,8 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
   const e = detail.event;
   const typeColor = EVENT_COLOR[e.event.type] ?? EVENT_COLOR.other;
   const verificationColor = VERIFICATION_COLOR[e.verification];
-  const [lng, lat] = e.location.geo.coordinates;
+  const coordinates = e.location.geo?.coordinates ?? null;
+  const [lng, lat] = coordinates ?? [0, 0];
   const precision = e.location.geo_precision ?? "unknown";
   const precisionM = GEO_PRECISION_RADIUS_M[precision];
 
@@ -207,20 +208,30 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
               title="ตำแหน่งที่เกิดเหตุ"
               action={
                 <span className="text-[10.5px] text-ink-muted">
-                  ความละเอียด: {GEO_PRECISION_LABEL[precision]} · คลาดเคลื่อนราว{" "}
-                  <span className="num">{(precisionM / 1000).toLocaleString("en-US")}</span> กม.
+                  {coordinates
+                    ? <>ความละเอียด: {GEO_PRECISION_LABEL[precision]} · คลาดเคลื่อนราว{" "}<span className="num">{(precisionM / 1000).toLocaleString("en-US")}</span> กม.</>
+                    : "มีที่อยู่ แต่แหล่งข้อมูลไม่เผยแพร่พิกัด"}
                 </span>
               }
             >
-              <div className="h-[300px] w-full">
-                <CaseLocationMap lng={lng} lat={lat} precisionM={precisionM} color={typeColor} />
-              </div>
-              <p className="border-t border-[rgba(37,66,102,0.45)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-muted">
-                พิกัด <span className="num text-ink-dim">{lat.toFixed(6)}, {lng.toFixed(6)}</span> —{" "}
-                {precision === "gps"
-                  ? "เป็นพิกัดที่แหล่งข้อมูลรายงานมาโดยตรง"
-                  : `ไม่ใช่พิกัดจุดเกิดเหตุจริง แต่เป็นจุดอ้างอิงระดับ${GEO_PRECISION_LABEL[precision]} วงกลมบนแผนที่คือขอบเขตความคลาดเคลื่อนที่ควรอ่านค่านี้`}
-              </p>
+              {coordinates ? (
+                <>
+                  <div className="h-[300px] w-full">
+                    <CaseLocationMap lng={lng} lat={lat} precisionM={precisionM} color={typeColor} />
+                  </div>
+                  <p className="border-t border-[rgba(37,66,102,0.45)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-muted">
+                    พิกัด <span className="num text-ink-dim">{lat.toFixed(6)}, {lng.toFixed(6)}</span> —{" "}
+                    {precision === "gps"
+                      ? "เป็นพิกัดที่แหล่งข้อมูลรายงานมาโดยตรง"
+                      : `ไม่ใช่พิกัดจุดเกิดเหตุจริง แต่เป็นจุดอ้างอิงระดับ${GEO_PRECISION_LABEL[precision]} วงกลมบนแผนที่คือขอบเขตความคลาดเคลื่อนที่ควรอ่านค่านี้`}
+                  </p>
+                </>
+              ) : (
+                <div className="px-4 py-5 text-[11.5px] leading-relaxed text-ink-dim">
+                  <p>{e.location.place ?? `${e.location.district}, ${e.location.province}`}</p>
+                  <p className="mt-2 text-ink-muted">ยังไม่ปักหมุดบนแผนที่ เพราะหลักฐานต้นทางไม่ได้เผยแพร่พิกัดที่ตรวจสอบได้</p>
+                </div>
+              )}
             </Panel>
 
             {e.media.length > 0 && (

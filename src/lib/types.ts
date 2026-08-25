@@ -177,7 +177,8 @@ export interface EventCandidateDoc {
     subdistrict: string | null;
     /** Free-text place description, e.g. a landmark or road. */
     place: string | null;
-    geo: GeoPoint;
+    /** null when the evidence names an address/site but publishes no defensible coordinates. */
+    geo: GeoPoint | null;
     /** Never treat a district centroid as a GPS fix — see GeoPrecision. */
     geo_precision: GeoPrecision;
   };

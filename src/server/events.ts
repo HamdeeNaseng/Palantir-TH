@@ -122,7 +122,13 @@ export async function getEventsWorkspace(
   return {
     live: bundle.live,
     filters,
-    events: { type: "FeatureCollection", features: sorted.map((e) => toEventFeature(e)) },
+    events: {
+      type: "FeatureCollection",
+      features: sorted.flatMap((e) => {
+        const feature = toEventFeature(e);
+        return feature ? [feature] : [];
+      }),
+    },
     totalMatched: matched.length,
     span,
     totalDistrictsInScope,

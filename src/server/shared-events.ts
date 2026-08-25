@@ -194,7 +194,10 @@ const UNKNOWN_SEVERITY_FALLBACK = 3;
  * One event as a GeoJSON feature for MapLibre. Properties are flat scalars
  * because MapLibre filter/paint expressions can only read primitives.
  */
-export function toEventFeature(e: EventCandidateDoc): EventFeature {
+export function toEventFeature(e: EventCandidateDoc): EventFeature | null {
+  // An address is useful evidence even when the source publishes no point.
+  // Keep that event in lists and statistics, but never invent a map marker.
+  if (!e.location.geo) return null;
   return {
     type: "Feature",
     geometry: { type: "Point", coordinates: e.location.geo.coordinates },
