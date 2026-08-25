@@ -1,0 +1,6 @@
+﻿model,kind,r2_insample,aic
+OLS linear trend (t),linear,0.40726144544352316,2635.8021245005543
+OLS polynomial deg 3,linear (poly),0.6666891374849886,2475.1582622275573
+Poisson GLM (t),nonlinear (GLM),0.3053037580456789,5759.66787888299
+Negative Binomial (t),nonlinear (GLM),0.20421905910327554,2448.7411808131055
+Gaussian bump (curve_fit),nonlinear (parametric),0.6949066804839854,
