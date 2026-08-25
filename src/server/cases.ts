@@ -122,7 +122,11 @@ type Dimension = "province" | "district" | "type" | "verification" | "source" | 
  * with no way back.
  */
 function buildMatch(f: CaseFilters, except?: Dimension): Filter<EventCandidateDoc> {
-  const and: Filter<EventCandidateDoc>[] = [];
+  // Source-level duplicates remain archived for provenance, but only the
+  // selected representative belongs in the case register.
+  const and: Filter<EventCandidateDoc>[] = [
+    { "attributes.superseded_by": { $exists: false } } as Filter<EventCandidateDoc>,
+  ];
 
   if (f.q) {
     const rx = { $regex: escapeRegex(f.q), $options: "i" };
@@ -172,7 +176,7 @@ function buildMatch(f: CaseFilters, except?: Dimension): Filter<EventCandidateDo
     and.push({ "media.0": { $exists: true } } as Filter<EventCandidateDoc>);
   }
 
-  return and.length ? { $and: and } : {};
+  return { $and: and };
 }
 
 /**
@@ -299,7 +303,7 @@ export async function listCases(filters: CaseFilters): Promise<CaseListResult> {
     ] = await Promise.all([
       events.find(match).sort(buildSort(filters)).skip(skip).limit(CASES_PER_PAGE).toArray(),
       events.countDocuments(match),
-      events.estimatedDocumentCount(),
+      events.countDocuments({ "attributes.superseded_by": { $exists: false } }),
       db.collection<SourceRegistryDoc>(COLLECTIONS.sourceRegistry).find({}).toArray(),
       bucketsOf("location.provinceCode", "province"),
       events
@@ -330,6 +334,7 @@ export async function listCases(filters: CaseFilters): Promise<CaseListResult> {
       events.countDocuments(buildMatch({ ...filters, hasMedia: true })),
       events
         .aggregate<{ min: Date; max: Date }>([
+          { $match: { "attributes.superseded_by": { $exists: false } } },
           { $group: { _id: null, min: { $min: "$time.start" }, max: { $max: "$time.start" } } },
         ])
         .toArray(),
@@ -552,6 +557,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       events
         .find({
           _id: { $ne: event._id },
+          "attributes.superseded_by": { $exists: false },
           "location.district": event.location.district,
           "location.provinceCode": event.location.provinceCode,
           "time.start": {
