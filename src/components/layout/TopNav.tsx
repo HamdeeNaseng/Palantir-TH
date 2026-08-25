@@ -12,6 +12,7 @@ const TABS = [
   { href: "/investigate", label: "สืบสวน" },
   { href: "/events", label: "เหตุการณ์" },
   { href: "/cases", label: "เคส" },
+  { href: "/report", label: "รายงาน" },
   { href: "/network", label: "เครือข่าย" },
   { href: "/map", label: "แผนที่" },
   { href: "/sources", label: "แหล่งข้อมูล" },
