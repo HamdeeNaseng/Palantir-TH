@@ -162,7 +162,48 @@ function baseStyle(): StyleSpecification {
   };
 }
 
-export default function MapPanel({ events }: { events: EventFeatureCollection }) {
+export interface MapCluster {
+  lng: number;
+  lat: number;
+  tier: "high" | "medium";
+  label: string;
+}
+
+interface MapPanelProps {
+  events: EventFeatureCollection;
+  /**
+   * Controlled-mode playhead. When both `currentTimestamp` and
+   * `onTimestampChange` are supplied, this component drives its layers off
+   * the parent's state instead of its own, and hides its bottom scrubber bar
+   * (the parent owns the only playhead UI — `/events`'s dedicated Timeline
+   * panel). Omit both, as `/investigate` does today, and MapPanel is exactly
+   * as self-contained as before.
+   */
+  currentTimestamp?: number;
+  onTimestampChange?: (ts: number) => void;
+  playing?: boolean;
+  onPlayingChange?: (playing: boolean) => void;
+  /** Fires on hover/unhover of a point — lets a sibling panel track it. */
+  onHoverFeature?: (id: string | null) => void;
+  /** Fires on click of a point. */
+  onSelectFeature?: (id: string | null) => void;
+  /** A short, already-scoped recent-movement line — see `scopedTimePath`. */
+  timePath?: [number, number][];
+  /** Statistically-significant district clusters — see `districtClusters`. */
+  clusters?: MapCluster[];
+}
+
+export default function MapPanel({
+  events,
+  currentTimestamp: controlledTimestamp,
+  onTimestampChange,
+  playing: controlledPlaying,
+  onPlayingChange,
+  onHoverFeature,
+  onSelectFeature,
+  timePath,
+  clusters,
+}: MapPanelProps) {
   const holder = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [view, setView] = useState<View>("ไฮบริด");
@@ -175,12 +216,31 @@ export default function MapPanel({ events }: { events: EventFeatureCollection })
       end: timestamps.length ? Math.max(...timestamps) : now,
     };
   }, [events]);
-  const [currentTimestamp, setCurrentTimestamp] = useState(timeRange.end);
-  const [playing, setPlaying] = useState(false);
+  const isControlled = controlledTimestamp !== undefined && onTimestampChange !== undefined;
+  const [internalTimestamp, setInternalTimestamp] = useState(timeRange.end);
+  const [internalPlaying, setInternalPlaying] = useState(false);
+  const currentTimestamp = isControlled ? controlledTimestamp : internalTimestamp;
+  const setCurrentTimestamp = isControlled ? onTimestampChange : setInternalTimestamp;
+  const playing = isControlled ? (controlledPlaying ?? false) : internalPlaying;
+  const setPlaying = isControlled ? (onPlayingChange ?? (() => {})) : setInternalPlaying;
   const visibleEvents = useMemo(
     () => events.features.filter((feature) => feature.properties.ts <= currentTimestamp).length,
     [currentTimestamp, events],
   );
+
+  // The map-creation effect below runs exactly once (empty deps — tearing
+  // down and rebuilding a MapLibre instance on every parent re-render would be
+  // absurd), so its event handlers close over these callbacks at mount time.
+  // Refs let a fresh callback reference each render still be the one that
+  // actually runs, without needing to re-run map setup.
+  const onHoverFeatureRef = useRef(onHoverFeature);
+  const onSelectFeatureRef = useRef(onSelectFeature);
+  useEffect(() => {
+    onHoverFeatureRef.current = onHoverFeature;
+  }, [onHoverFeature]);
+  useEffect(() => {
+    onSelectFeatureRef.current = onSelectFeature;
+  }, [onSelectFeature]);
 
   // Create the map once; data and paint changes are applied in later effects.
   useEffect(() => {
@@ -265,6 +325,48 @@ export default function MapPanel({ events }: { events: EventFeatureCollection })
         },
       });
 
+      // Only added when a parent actually supplies these — `/investigate`'s
+      // plain usage never creates them, so its map is unchanged.
+      if (timePath !== undefined) {
+        m.addSource("time-path", { type: "geojson", data: emptyLineString() });
+        m.addLayer({
+          id: "time-path-line",
+          type: "line",
+          source: "time-path",
+          paint: {
+            "line-color": "#38bdf8",
+            "line-width": 1.6,
+            "line-dasharray": [2, 1.6],
+            "line-opacity": 0.85,
+          },
+        });
+      }
+      if (clusters !== undefined) {
+        m.addSource("clusters", { type: "geojson", data: emptyFeatureCollection() });
+        m.addLayer({
+          id: "clusters-glow",
+          type: "circle",
+          source: "clusters",
+          paint: {
+            "circle-color": ["match", ["get", "tier"], "high", "#ef4444", "#f59e0b"],
+            "circle-radius": ["match", ["get", "tier"], "high", 26, 20],
+            "circle-opacity": 0.16,
+            "circle-blur": 0.9,
+          },
+        });
+        m.addLayer({
+          id: "clusters-ring",
+          type: "circle",
+          source: "clusters",
+          paint: {
+            "circle-color": "transparent",
+            "circle-radius": ["match", ["get", "tier"], "high", 7, 5.5],
+            "circle-stroke-color": ["match", ["get", "tier"], "high", "#ef4444", "#f59e0b"],
+            "circle-stroke-width": 1.6,
+          },
+        });
+      }
+
       setReady(true);
     });
 
@@ -296,10 +398,16 @@ export default function MapPanel({ events }: { events: EventFeatureCollection })
            <div class="pp-row"><span>ความละเอียดพิกัด</span><b>${PRECISION_LABEL[String(p.precision)] ?? "ไม่ระบุ"}</b></div>`,
         )
         .addTo(m);
+      onHoverFeatureRef.current?.(String(p.id));
     });
     m.on("mouseleave", "events-point", () => {
       m.getCanvas().style.cursor = "";
       popup.remove();
+      onHoverFeatureRef.current?.(null);
+    });
+    m.on("click", "events-point", (e: MapLayerMouseEvent) => {
+      const p = e.features?.[0]?.properties as Record<string, string> | undefined;
+      onSelectFeatureRef.current?.(p ? p.id : null);
     });
 
     const boundaryPopup = new maplibregl.Popup({
@@ -334,10 +442,41 @@ export default function MapPanel({ events }: { events: EventFeatureCollection })
     src?.setData(events as never);
   }, [events, ready]);
 
+  // Same update pattern as the `events` source above, for the two optional
+  // layers — only touches sources that were actually created (i.e. only when
+  // the parent passed these props in the first place).
   useEffect(() => {
+    if (!ready || timePath === undefined) return;
+    const src = map.current?.getSource("time-path") as maplibregl.GeoJSONSource | undefined;
+    src?.setData({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: timePath },
+      properties: {},
+    } as never);
+  }, [timePath, ready]);
+
+  useEffect(() => {
+    if (!ready || clusters === undefined) return;
+    const src = map.current?.getSource("clusters") as maplibregl.GeoJSONSource | undefined;
+    src?.setData({
+      type: "FeatureCollection",
+      features: clusters.map((c) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [c.lng, c.lat] },
+        properties: { tier: c.tier, label: c.label },
+      })),
+    } as never);
+  }, [clusters, ready]);
+
+  // Controlled mode: the parent (e.g. EventsWorkspace) owns the initial
+  // timestamp and any reset-on-refilter behaviour; MapPanel must not
+  // unilaterally snap it back to `timeRange.end` out from under the parent.
+  useEffect(() => {
+    if (isControlled) return;
     setCurrentTimestamp(timeRange.end);
     setPlaying(false);
-  }, [timeRange.end, timeRange.start]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRange.end, timeRange.start, isControlled]);
 
   // Event replay is a GPU-layer filter; advancing time does not create or
   // destroy DOM/SVG nodes and remains cheap as the feature count grows.
@@ -354,17 +493,29 @@ export default function MapPanel({ events }: { events: EventFeatureCollection })
     ]);
   }, [currentTimestamp, ready]);
 
+  // Tracks the latest timestamp outside React state so the interval below can
+  // read "where are we right now" without depending on `currentTimestamp` (which
+  // would tear the interval down and rebuild it every single tick). A plain
+  // ref instead of the functional-setState form (`setCurrentTimestamp(prev =>
+  // ...)`) because in controlled mode `setCurrentTimestamp` is the parent's
+  // callback, which — unlike a `useState` setter — has no functional-update form.
+  const latestTimestampRef = useRef(currentTimestamp);
+  useEffect(() => {
+    latestTimestampRef.current = currentTimestamp;
+  }, [currentTimestamp]);
+
   useEffect(() => {
     if (!playing || timeRange.end <= timeRange.start) return;
     const step = Math.max(60 * 60 * 1000, Math.ceil((timeRange.end - timeRange.start) / 120));
     const timer = window.setInterval(() => {
-      setCurrentTimestamp((timestamp) => {
-        if (timestamp >= timeRange.end) {
-          setPlaying(false);
-          return timeRange.end;
-        }
-        return Math.min(timeRange.end, timestamp + step);
-      });
+      const t = latestTimestampRef.current;
+      if (t >= timeRange.end) {
+        setPlaying(false);
+        return;
+      }
+      const next = Math.min(timeRange.end, t + step);
+      latestTimestampRef.current = next;
+      setCurrentTimestamp(next);
     }, 80);
     return () => window.clearInterval(timer);
   }, [playing, timeRange.end, timeRange.start]);
@@ -508,38 +659,43 @@ export default function MapPanel({ events }: { events: EventFeatureCollection })
           <span className="num">{events.features.length.toLocaleString("en-US")} เหตุการณ์</span>
         </p>
 
-        <div className="pointer-events-auto absolute bottom-6 left-1/2 w-[430px] -translate-x-1/2 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 py-1.5 shadow-lg">
-          <div className="mb-1 flex items-center gap-2">
-            <button
-              type="button"
-              aria-label={playing ? "หยุดการเล่นเหตุการณ์" : "เล่นเหตุการณ์ตามเวลา"}
-              onClick={() => {
-                if (!playing && currentTimestamp >= timeRange.end) setCurrentTimestamp(timeRange.start);
-                setPlaying((value) => !value);
+        {/* Own playhead UI only in uncontrolled mode — a controlling parent
+            (e.g. EventsWorkspace) has its own dedicated Timeline panel, and
+            two playheads on screen at once would just fight each other. */}
+        {!isControlled && (
+          <div className="pointer-events-auto absolute bottom-6 left-1/2 w-[430px] -translate-x-1/2 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 py-1.5 shadow-lg">
+            <div className="mb-1 flex items-center gap-2">
+              <button
+                type="button"
+                aria-label={playing ? "หยุดการเล่นเหตุการณ์" : "เล่นเหตุการณ์ตามเวลา"}
+                onClick={() => {
+                  if (!playing && currentTimestamp >= timeRange.end) setCurrentTimestamp(timeRange.start);
+                  setInternalPlaying((value) => !value);
+                }}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-azure text-[#04070e] hover:bg-cyan"
+              >
+                {playing ? <IconPlayerPause size={11} /> : <IconPlayerPlay size={11} />}
+              </button>
+              <span className="num min-w-[82px] text-[10px] text-ink-dim">{replayDate}</span>
+              <span className="ml-auto text-[9.5px] text-ink-muted">
+                แสดง {visibleEvents.toLocaleString("en-US")} / {events.features.length.toLocaleString("en-US")}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={timeRange.start}
+              max={timeRange.end}
+              step={Math.max(1, Math.floor((timeRange.end - timeRange.start) / 500))}
+              value={currentTimestamp}
+              onChange={(event) => {
+                setInternalPlaying(false);
+                setCurrentTimestamp(Number(event.target.value));
               }}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-azure text-[#04070e] hover:bg-cyan"
-            >
-              {playing ? <IconPlayerPause size={11} /> : <IconPlayerPlay size={11} />}
-            </button>
-            <span className="num min-w-[82px] text-[10px] text-ink-dim">{replayDate}</span>
-            <span className="ml-auto text-[9.5px] text-ink-muted">
-              แสดง {visibleEvents.toLocaleString("en-US")} / {events.features.length.toLocaleString("en-US")}
-            </span>
+              aria-label="ช่วงเวลาที่แสดงบนแผนที่"
+              className="block h-1 w-full cursor-pointer accent-sky-400"
+            />
           </div>
-          <input
-            type="range"
-            min={timeRange.start}
-            max={timeRange.end}
-            step={Math.max(1, Math.floor((timeRange.end - timeRange.start) / 500))}
-            value={currentTimestamp}
-            onChange={(event) => {
-              setPlaying(false);
-              setCurrentTimestamp(Number(event.target.value));
-            }}
-            aria-label="ช่วงเวลาที่แสดงบนแผนที่"
-            className="block h-1 w-full cursor-pointer accent-sky-400"
-          />
-        </div>
+        )}
       </div>
     </section>
   );
@@ -554,6 +710,15 @@ const PRECISION_LABEL: Record<string, string> = {
   province: "centroid จังหวัด",
   unknown: "ไม่ระบุ",
 };
+
+/** Placeholder GeoJSON so a source can be created before real data exists. */
+function emptyLineString(): GeoJSON.Feature<GeoJSON.LineString> {
+  return { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
+}
+
+function emptyFeatureCollection(): GeoJSON.FeatureCollection {
+  return { type: "FeatureCollection", features: [] };
+}
 
 /** Popup HTML is built by hand, so escape anything sourced from the data. */
 function escapeHtml(s: string) {

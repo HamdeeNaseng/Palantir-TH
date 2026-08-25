@@ -251,7 +251,7 @@ export function RecentEventsPanel({
   );
 }
 
-function SeverityPill({ level, label }: { level: number; label: string }) {
+export function SeverityPill({ level, label }: { level: number; label: string }) {
   // level 0 means the source reported nothing implying severity. Show that as
   // an explicit unknown rather than as the lowest rung, which would read as
   // "this was minor" — a claim the data does not support.

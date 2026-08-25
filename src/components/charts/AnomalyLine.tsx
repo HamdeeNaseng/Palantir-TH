@@ -1,6 +1,18 @@
+export interface AnomalyBand {
+  /** Index into `daily`/`average`/`labels`, inclusive. */
+  start: number;
+  end: number;
+  color: string;
+  label: string;
+}
+
 /**
  * Daily citizen-report volume against its 30-day mean, with the anomalous days
  * boxed in red — the "พุ่งสูงผิดปกติ" callout from the mockup.
+ *
+ * `band` overrides that anomaly highlight with a caller-supplied one instead
+ * (used by `/events` to highlight "ช่วงที่กำลังเล่น" in azure rather than red) —
+ * omitted, as `CitizenSignalPanel` does today, and behaviour is unchanged.
  */
 export default function AnomalyLine({
   daily,
@@ -8,12 +20,14 @@ export default function AnomalyLine({
   anomalyIndex,
   labels,
   height = 132,
+  band,
 }: {
   daily: number[];
   average: number[];
   anomalyIndex: number[];
   labels: string[];
   height?: number;
+  band?: AnomalyBand;
 }) {
   const W = 420;
   const H = height;
@@ -40,6 +54,23 @@ export default function AnomalyLine({
   const anomalyStart = anomalyIndex.length ? Math.min(...anomalyIndex) : null;
   const anomalyEnd = anomalyIndex.length ? Math.max(...anomalyIndex) : null;
 
+  // A caller-supplied band takes over the highlight entirely; otherwise fall
+  // back to the anomaly-index-derived one, unchanged from before this prop
+  // existed — same literal rgba() strings as before, not a hex+alpha
+  // equivalent, so `CitizenSignalPanel`'s existing rendering stays pixel-for-pixel.
+  const highlight = band
+    ? { ...band, fill: `${band.color}29`, stroke: `${band.color}8c` }
+    : anomalyStart !== null && anomalyEnd !== null
+      ? {
+          start: anomalyStart,
+          end: anomalyEnd,
+          color: "#f87171",
+          label: "พุ่งสูงผิดปกติ",
+          fill: "rgba(239,68,68,0.16)",
+          stroke: "rgba(239,68,68,0.55)",
+        }
+      : null;
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="แนวโน้มรายวัน 30 วัน">
       {[...new Set(grid)].map((v) => (
@@ -51,26 +82,26 @@ export default function AnomalyLine({
         </g>
       ))}
 
-      {anomalyStart !== null && anomalyEnd !== null && (
+      {highlight && (
         <>
           <rect
-            x={x(anomalyStart) - step / 2}
+            x={x(highlight.start) - step / 2}
             y={padT}
-            width={(anomalyEnd - anomalyStart + 1) * step}
+            width={(highlight.end - highlight.start + 1) * step}
             height={plotH}
-            fill="rgba(239,68,68,0.16)"
-            stroke="rgba(239,68,68,0.55)"
+            fill={highlight.fill}
+            stroke={highlight.stroke}
             strokeWidth="1"
           />
           <text
-            x={x(anomalyStart) + ((anomalyEnd - anomalyStart) * step) / 2}
+            x={x(highlight.start) + ((highlight.end - highlight.start) * step) / 2}
             y={padT - 4}
             textAnchor="middle"
             fontSize="9"
-            fill="#f87171"
+            fill={highlight.color}
             fontWeight="600"
           >
-            พุ่งสูงผิดปกติ
+            {highlight.label}
           </text>
         </>
       )}
