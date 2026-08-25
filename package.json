@@ -33,6 +33,7 @@
     "ingest:verified-20260531-0606": "tsx scripts/import-verified-events-2026-05-31-to-06-06.ts",
     "ingest:verified-20260524-30": "tsx scripts/import-verified-events-2026-05-24-to-30.ts",
     "ingest:verified-20260517-23": "tsx scripts/import-verified-events-2026-05-17-to-23.ts",
+    "ingest:verified-20260510-16": "tsx scripts/import-verified-events-2026-05-10-to-16.ts",
     "ingest:police75": "tsx scripts/import-75-case-register.ts"
   },
   "engines": {
