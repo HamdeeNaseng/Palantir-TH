@@ -1,7 +1,8 @@
 node_modules/
 .next/
-.next-build/
-.next-build-backup-*/
+# .next-build/, .next-build-backup-*/, and any NEXT_DIST_DIR a second dev
+# server was pointed at.
+.next-*/
 out/
 build/
 next-env.d.ts.bak
