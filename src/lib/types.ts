@@ -88,7 +88,15 @@ export interface SourceRegistryDoc {
    * Absent for sources that are not in the priority table.
    */
   role?: string;
-  connector: { type: "REST_API" | "SCRAPER" | "DATASET"; endpoint?: string };
+  connector: {
+    type:
+      | "REST_API"
+      | "SCRAPER"
+      | "DATASET"
+      /** A public submission form — the citizen-report intake at `/report`. */
+      | "FORM";
+    endpoint?: string;
+  };
   schedule: { mode: "snapshot" | "incremental" | "versioned"; frequency: string };
   trust: { class: SourceTrustClass; /** 0-100, drives the reliability bars */ score: number };
   enabled: boolean;
@@ -109,6 +117,35 @@ export interface IngestionRunDoc {
     failed: number;
   };
   error?: string;
+}
+
+/**
+ * `raw_records` — the source's own payload, archived exactly as received.
+ *
+ * Append-only: nothing downstream may edit one of these. `raw` is `unknown`
+ * because each source's shape is its own — a JSON row from ศอ.บต., an HTML
+ * body from Deep South Watch — and forcing them into a common shape here is
+ * precisely the transformation this layer exists to defer.
+ */
+export interface RawRecordDoc {
+  _id: string;
+  source_id: string;
+  external_id: string;
+  retrieved_at: Date;
+  source: {
+    url: string;
+    published_at?: Date;
+    http_status?: number;
+    content_type?: string;
+    etag?: string;
+    last_modified?: string;
+  };
+  dataset?: { name: string; version?: string };
+  raw: unknown;
+  /** Content hash of the payload, so tampering is detectable after the fact. */
+  integrity: { content_hash: string; algorithm: "sha256" };
+  processing: { status: "pending" | "normalized" };
+  ingestion_run_id: string;
 }
 
 /** A file the source attached to a record — photo, document, scan. */

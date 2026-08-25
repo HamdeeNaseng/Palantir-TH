@@ -21,6 +21,7 @@ import type {
   GeoPrecision,
   IngestionRunDoc,
   ProvinceCode,
+  RawRecordDoc,
   SeverityLevel,
   SourceRegistryDoc,
   VerificationStatus,
@@ -69,26 +70,6 @@ interface SourcePayload {
     last_modified?: string;
   };
   dataset?: { name: string; version?: string };
-}
-
-interface RawRecordDoc {
-  _id: string;
-  source_id: string;
-  external_id: string;
-  retrieved_at: Date;
-  source: {
-    url: string;
-    published_at?: Date;
-    http_status?: number;
-    content_type?: string;
-    etag?: string;
-    last_modified?: string;
-  };
-  dataset?: { name: string; version?: string };
-  raw: unknown;
-  integrity: { content_hash: string; algorithm: "sha256" };
-  processing: { status: "pending" | "normalized" };
-  ingestion_run_id: string;
 }
 
 interface IngestCounts {
