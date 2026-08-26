@@ -1,11 +1,29 @@
 {
   "version": 1,
   "skills": {
+    "chrome-extensions": {
+      "source": "GoogleChrome/modern-web-guidance",
+      "sourceType": "github",
+      "skillPath": "skills/chrome-extensions/SKILL.md",
+      "computedHash": "4b7e7beb7711c75ba267dcd5e3483d56aaa49d4670db88fd8619afea970cbccc"
+    },
     "deploy-to-vercel": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/deploy-to-vercel/SKILL.md",
       "computedHash": "03e0eaaa9bf13ba1e7ffa387f5893de6f324c0868c627001f179395a8feaa7c9"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "modern-web-guidance": {
+      "source": "GoogleChrome/modern-web-guidance",
+      "sourceType": "github",
+      "skillPath": "skills/modern-web-guidance/SKILL.md",
+      "computedHash": "4ee084ed0244a3bfd98d5a3845e5ae018b93a423f37c86ba710aa9ea1f951284"
     },
     "mongodb-connection": {
       "source": "mongodb/agent-skills",
