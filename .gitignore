@@ -21,6 +21,11 @@ next-env.d.ts
 data/raw/
 pilot.env
 
+# Environment files staged for upload to a hosting provider. They carry the
+# same credentials as .env, so they get the same rule: never in git.
+vercel.env
+*.vercel.env
+
 # Playwright
 /test-results/
 /playwright-report/
