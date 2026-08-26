@@ -34,9 +34,14 @@ scripts/test-atlas.ts
 scripts/sync-mongo.ts
 scripts/import-verified-events-*.ts
 
-.claude
 
+.claude
+.age
 client_secret_443986413848-n8st72rtmns3qrcgjevingpp8g2i7cff.apps.googleusercontent.com.json
+
+# Google OAuth client credential, as downloaded from Google Cloud. A live
+# secret; it has never been committed and this rule keeps it that way.
+client_secret_*.apps.googleusercontent.com.json
 
 # Agent skills installed from the internet (`npx skills add`). The content is
 # reproducible from skills-lock.json, which records each skill's source repo and
