@@ -27,7 +27,7 @@ const PROVINCE_CODES = ["90", "94", "95", "96"] as const; // สงขลา ป
 interface LayerSpec {
   /** Output basename under public/data. */
   name: string;
-  layerId: 1 | 2;
+  layerId: 1 | 2 | 3;
   /** ArcGIS `where` clause restricting the fetch to our four provinces. */
   where: string;
   outFields: string[];
@@ -38,6 +38,11 @@ interface LayerSpec {
   tolerance: number;
   /** Rename raw ArcGIS fields to the canonical property names. */
   map: (p: Record<string, unknown>) => Record<string, string>;
+  /**
+   * The mapped property that identifies one administrative unit. Parts sharing
+   * it are combined into a single MultiPolygon feature — see `mergeParts`.
+   */
+  idField: string;
 }
 
 const LAYERS: LayerSpec[] = [
@@ -48,6 +53,7 @@ const LAYERS: LayerSpec[] = [
     // double-paint their shared fill.
     name: "thailand-provinces",
     layerId: 1,
+    idField: "province_code",
     where: `PROV_CODE NOT IN (${PROVINCE_CODES.map((c) => `'${c}'`).join(",")})`,
     outFields: ["PROV_CODE", "PROV_NAM_T", "PROV_NAM_E"],
     // Context only — never inspected up close, so it can be much coarser.
@@ -61,6 +67,7 @@ const LAYERS: LayerSpec[] = [
   {
     name: "south-provinces",
     layerId: 1,
+    idField: "province_code",
     where: `PROV_CODE IN (${PROVINCE_CODES.map((c) => `'${c}'`).join(",")})`,
     outFields: ["PROV_CODE", "PROV_NAM_T", "PROV_NAM_E"],
     // Matched to the district tolerance below. Simplifying the two levels at
@@ -77,6 +84,7 @@ const LAYERS: LayerSpec[] = [
   {
     name: "south-districts",
     layerId: 2,
+    idField: "district_code",
     where: `PROV_CODE IN (${PROVINCE_CODES.map((c) => `'${c}'`).join(",")})`,
     outFields: ["AMP_CODE", "AMP_NAM_T", "AMP_NAM_E", "PROV_CODE", "PROV_NAM_T"],
     tolerance: 0.0006,
@@ -84,6 +92,34 @@ const LAYERS: LayerSpec[] = [
       district_code: String(p.AMP_CODE),
       district_th: stripPrefix(String(p.AMP_NAM_T ?? ""), "district"),
       district_en: titleCase(String(p.AMP_NAM_E ?? "").replace(/^AMPHOE\s+/i, "")),
+      province_code: String(p.PROV_CODE),
+      province_th: stripPrefix(String(p.PROV_NAM_T ?? ""), "province"),
+    }),
+  },
+  {
+    // ตำบล — the finest boundary DDPM publishes. There is no หมู่บ้าน layer on
+    // this service, and no Thai authority publishes village polygons openly;
+    // village-level detail comes from `fetch-villages.ts` as points instead.
+    name: "south-subdistricts",
+    layerId: 3,
+    idField: "subdistrict_code",
+    where: `PROV_CODE IN (${PROVINCE_CODES.map((c) => `'${c}'`).join(",")})`,
+    outFields: [
+      "TAM_CODE", "TAM_NAM_T", "TAM_NAM_E",
+      "AMP_CODE", "AMP_NAM_T",
+      "PROV_CODE", "PROV_NAM_T",
+    ],
+    // Identical to the district tolerance on purpose. ตำบล tile their อำเภอ
+    // exactly, so simplifying the two levels differently would make tambon
+    // lines cut across the district outline they are supposed to sit inside —
+    // the same artefact the province/district pairing above avoids.
+    tolerance: 0.0006,
+    map: (p) => ({
+      subdistrict_code: String(p.TAM_CODE),
+      subdistrict_th: stripPrefix(String(p.TAM_NAM_T ?? ""), "subdistrict"),
+      subdistrict_en: titleCase(String(p.TAM_NAM_E ?? "").replace(/^TAMBON\s+/i, "")),
+      district_code: String(p.AMP_CODE),
+      district_th: stripPrefix(String(p.AMP_NAM_T ?? ""), "district"),
       province_code: String(p.PROV_CODE),
       province_th: stripPrefix(String(p.PROV_NAM_T ?? ""), "province"),
     }),
@@ -98,10 +134,14 @@ const titleCase = (s: string) =>
  * are inconsistent — the province layer spells it out ("จังหวัดปัตตานี") while
  * the amphoe layer abbreviates ("อ.เมืองสงขลา", "จ.สงขลา") — so handle both.
  */
-const stripPrefix = (s: string, kind: "province" | "district") =>
-  s
-    .replace(kind === "province" ? /^(จังหวัด|จ\.)\s*/ : /^(อำเภอ|อ\.)\s*/, "")
-    .trim();
+const PREFIX_PATTERN: Record<"province" | "district" | "subdistrict", RegExp> = {
+  province: /^(จังหวัด|จ\.)\s*/,
+  district: /^(อำเภอ|อ\.)\s*/,
+  subdistrict: /^(ตำบล|ต\.)\s*/,
+};
+
+const stripPrefix = (s: string, kind: keyof typeof PREFIX_PATTERN) =>
+  s.replace(PREFIX_PATTERN[kind], "").trim();
 
 interface GeoJsonFeature {
   type: "Feature";
@@ -145,13 +185,68 @@ function validate(features: GeoJsonFeature[], label: string) {
 
 const byteSize = (o: unknown) => Buffer.byteLength(JSON.stringify(o));
 
+/**
+ * Combine features that describe parts of the same administrative unit.
+ *
+ * DDPM publishes a unit split across disjoint areas as several polygons with
+ * one shared code — ต.เกาะยอ and ต.เกาะใหญ่ are each two islands. Leaving them
+ * separate would break every consumer that assumes a code identifies exactly
+ * one feature: containment lookups would find whichever part came first, and
+ * a code-keyed join would silently drop the rest of the unit.
+ *
+ * Nothing else changes for the common case — a single-part unit stays a
+ * Polygon rather than being promoted to a one-element MultiPolygon.
+ */
+function mergeParts(features: GeoJsonFeature[], idField: string): GeoJsonFeature[] {
+  const groups = new Map<string, GeoJsonFeature[]>();
+  for (const f of features) {
+    const key = f.properties[idField];
+    const group = groups.get(key);
+    if (group) group.push(f);
+    else groups.set(key, [f]);
+  }
+
+  return Array.from(groups.values()).map((parts) => {
+    if (parts.length === 1) return parts[0];
+    const coordinates = parts.flatMap((p) =>
+      p.geometry.type === "MultiPolygon"
+        ? (p.geometry.coordinates as unknown[][])
+        : [p.geometry.coordinates as unknown[]],
+    );
+    return {
+      type: "Feature" as const,
+      properties: parts[0].properties,
+      geometry: { type: "MultiPolygon", coordinates },
+    };
+  });
+}
+
+/**
+ * `--only=<name>[,<name>]` limits the run to named layers.
+ *
+ * Without it, adding a level means re-publishing the three that were already
+ * correct, with a fresh `fetched_at` on each — provenance churn that says
+ * something was re-sourced when nothing was.
+ */
+function selectedLayers(): LayerSpec[] {
+  const arg = process.argv.find((a) => a.startsWith("--only="));
+  if (!arg) return LAYERS;
+  const wanted = new Set(arg.slice("--only=".length).split(",").filter(Boolean));
+  const picked = LAYERS.filter((l) => wanted.has(l.name));
+  if (picked.length !== wanted.size) {
+    const known = LAYERS.map((l) => l.name).join(", ");
+    throw new Error(`--only names an unknown layer. Known layers: ${known}`);
+  }
+  return picked;
+}
+
 async function main() {
   const outDir = resolve(process.cwd(), "public/data");
   await mkdir(outDir, { recursive: true });
 
   const fetchedAt = new Date().toISOString();
 
-  for (const spec of LAYERS) {
+  for (const spec of selectedLayers()) {
     const { url, features } = await fetchLayer(spec);
     validate(features, spec.name);
 
@@ -167,8 +262,10 @@ async function main() {
       return { type: "Feature" as const, properties: spec.map(f.properties), geometry };
     });
 
-    const collection = { type: "FeatureCollection" as const, features: cleaned };
+    const merged = mergeParts(cleaned, spec.idField);
+    const collection = { type: "FeatureCollection" as const, features: merged };
     const after = byteSize(collection);
+    const partsMerged = cleaned.length - merged.length;
 
     await writeFile(resolve(outDir, `${spec.name}.geojson`), JSON.stringify(collection));
 
@@ -185,7 +282,9 @@ async function main() {
           fetched_at: fetchedAt,
           crs: "EPSG:4326",
           encoding: "UTF-8",
-          feature_count: cleaned.length,
+          feature_count: merged.length,
+          /** Disjoint parts folded into MultiPolygon features — see mergeParts. */
+          parts_merged: partsMerged,
           simplify: { algorithm: "douglas-peucker", tolerance: spec.tolerance, highQuality: true },
           size_bytes: { source: before, published: after },
           field_mapping: spec.outFields,
@@ -200,7 +299,7 @@ async function main() {
 
     const pct = Math.round((1 - after / before) * 100);
     console.log(
-      `  ${spec.name.padEnd(17)} ${String(cleaned.length).padStart(3)} features  ` +
+      `  ${spec.name.padEnd(17)} ${String(merged.length).padStart(3)} features  ` +
         `${(before / 1024).toFixed(0)}KB -> ${(after / 1024).toFixed(0)}KB (-${pct}%)`,
     );
   }

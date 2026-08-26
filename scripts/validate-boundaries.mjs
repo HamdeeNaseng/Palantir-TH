@@ -18,6 +18,22 @@ const specs = [
     expected: 49,
     required: ["district_code", "district_th", "district_en", "province_code", "province_th"],
   },
+  {
+    name: "south-subdistricts",
+    code: "subdistrict_code",
+    // 379 polygons from DDPM, 377 ตำบล: ต.เกาะยอ and ต.เกาะใหญ่ are each
+    // published as two islands and are merged into MultiPolygons on fetch.
+    expected: 377,
+    required: [
+      "subdistrict_code",
+      "subdistrict_th",
+      "subdistrict_en",
+      "district_code",
+      "district_th",
+      "province_code",
+      "province_th",
+    ],
+  },
 ];
 
 function assert(condition, message) {

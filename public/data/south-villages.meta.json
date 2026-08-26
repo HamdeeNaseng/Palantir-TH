@@ -1,0 +1,28 @@
+{
+  "layer": "south-villages",
+  "owner": "OpenStreetMap contributors",
+  "licence": "ODbL 1.0 — https://www.openstreetmap.org/copyright",
+  "published_via": "Overpass API",
+  "access_method": "Overpass QL (POST)",
+  "source_url": "https://overpass-api.de/api/interpreter",
+  "query": "[out:json][timeout:180];\n(\n  node[\"place\"~\"^(village|hamlet)$\"](5.5,99.9,8.1,102.3);\n);\nout body;",
+  "osm_data_timestamp": "2026-08-26T02:55:02Z",
+  "fetched_at": "2026-08-26T02:56:43.112Z",
+  "crs": "EPSG:4326",
+  "encoding": "UTF-8",
+  "geometry": "Point",
+  "feature_count": 580,
+  "feature_count_by_province": {
+    "90": 229,
+    "94": 197,
+    "95": 15,
+    "96": 139
+  },
+  "dropped": {
+    "unnamed_or_latin_only": 1427,
+    "outside_four_provinces": 175
+  },
+  "joined_against": "public/data/south-districts.geojson, public/data/south-subdistricts.geojson",
+  "rows_without_subdistrict": 0,
+  "notes": "ไม่ใช่ทะเบียนหมู่บ้านทางการ — เป็นข้อมูลที่อาสาสมัคร OSM ร่วมกันสร้าง ความครอบคลุมไม่เท่ากันในแต่ละพื้นที่ และไม่มีขอบเขตพื้นที่ ใช้ได้เฉพาะเป็นชื่อสถานที่ใกล้เคียง ไม่ใช่การระบุว่าจุดหนึ่งอยู่ในหมู่บ้านใด การเผยแพร่ซ้ำต้องให้เครดิต OpenStreetMap ตามเงื่อนไข ODbL"
+}

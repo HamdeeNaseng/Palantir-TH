@@ -36,6 +36,41 @@ export interface Province extends BoundaryFeature {
   nameTh: string;
 }
 
+export interface Subdistrict extends BoundaryFeature {
+  code: string;
+  nameTh: string;
+  nameEn: string;
+  districtCode: string;
+  districtNameTh: string;
+  provinceCode: string;
+  provinceNameTh: string;
+}
+
+/**
+ * A หมู่บ้าน, as a point rather than an area.
+ *
+ * No Thai authority publishes village polygons openly — the DDPM boundary
+ * service stops at ตำบล — so this is the finest level the map can reach, and
+ * it reaches it with a different kind of geometry from a different publisher.
+ * `nearestVillage` is therefore an *approximation of the nearest named place*,
+ * never a statement that a point lies within that village.
+ */
+export interface Village {
+  /** OSM node id, so a record can be traced back to what was fetched. */
+  osmId: number;
+  nameTh: string;
+  nameEn: string | null;
+  /** OSM `place` value: village, hamlet, … */
+  kind: string;
+  lng: number;
+  lat: number;
+  subdistrictCode: string | null;
+  subdistrictNameTh: string | null;
+  districtCode: string;
+  districtNameTh: string;
+  provinceCode: string;
+}
+
 // ------------------------------------------------------------------ geometry
 
 /**
@@ -189,6 +224,8 @@ function readCollection(name: string): { features: { properties: Record<string, 
 
 let districtCache: District[] | null = null;
 let provinceCache: Province[] | null = null;
+let subdistrictCache: Subdistrict[] | null = null;
+let villageCache: Village[] | null = null;
 
 export function loadDistricts(): District[] {
   if (districtCache) return districtCache;
@@ -216,6 +253,62 @@ export function loadProvinces(): Province[] {
   return provinceCache;
 }
 
+export function loadSubdistricts(): Subdistrict[] {
+  if (subdistrictCache) return subdistrictCache;
+  subdistrictCache = readCollection("south-subdistricts").features.map((f) => ({
+    properties: f.properties,
+    geometry: f.geometry,
+    bbox: computeBbox(f.geometry),
+    code: f.properties.subdistrict_code,
+    nameTh: f.properties.subdistrict_th,
+    nameEn: f.properties.subdistrict_en,
+    districtCode: f.properties.district_code,
+    districtNameTh: f.properties.district_th,
+    provinceCode: f.properties.province_code,
+    provinceNameTh: f.properties.province_th,
+  }));
+  return subdistrictCache;
+}
+
+/**
+ * Villages, if they have been fetched.
+ *
+ * Returns an empty list rather than throwing when the file is absent: this
+ * layer comes from OpenStreetMap via a separate script, it is optional, and
+ * `/report` must keep working for someone who has only run the DDPM fetch.
+ */
+export function loadVillages(): Village[] {
+  if (villageCache) return villageCache;
+  try {
+    const raw = JSON.parse(
+      readFileSync(resolve(DATA_DIR, "south-villages.geojson"), "utf8"),
+    ) as {
+      features: {
+        properties: Record<string, string | number | null>;
+        geometry: { coordinates: [number, number] };
+      }[];
+    };
+    villageCache = raw.features.map((f) => ({
+      osmId: Number(f.properties.osm_id),
+      nameTh: String(f.properties.name_th),
+      nameEn: f.properties.name_en === null ? null : String(f.properties.name_en),
+      kind: String(f.properties.place),
+      lng: f.geometry.coordinates[0],
+      lat: f.geometry.coordinates[1],
+      subdistrictCode:
+        f.properties.subdistrict_code === null ? null : String(f.properties.subdistrict_code),
+      subdistrictNameTh:
+        f.properties.subdistrict_th === null ? null : String(f.properties.subdistrict_th),
+      districtCode: String(f.properties.district_code),
+      districtNameTh: String(f.properties.district_th),
+      provinceCode: String(f.properties.province_code),
+    }));
+  } catch {
+    villageCache = [];
+  }
+  return villageCache;
+}
+
 /** Districts belonging to one province, in stable code order. */
 export function districtsOfProvince(provinceCode: string): District[] {
   return loadDistricts()
@@ -233,6 +326,57 @@ export function districtAt(pt: Position): District | undefined {
       pt[1] <= d.bbox[3] &&
       pointInPolygon(pt, d.geometry),
   );
+}
+
+/** Which ตำบล contains this point, if any. */
+export function subdistrictAt(pt: Position): Subdistrict | undefined {
+  return loadSubdistricts().find(
+    (s) =>
+      pt[0] >= s.bbox[0] &&
+      pt[0] <= s.bbox[2] &&
+      pt[1] >= s.bbox[1] &&
+      pt[1] <= s.bbox[3] &&
+      pointInPolygon(pt, s.geometry),
+  );
+}
+
+/** Metres per degree of latitude; longitude is scaled by cos(lat) at use. */
+const M_PER_DEG_LAT = 111_320;
+
+/**
+ * Approximate great-circle distance in metres.
+ *
+ * An equirectangular approximation, not haversine: over the few kilometres
+ * this is ever asked about, at 6-8°N, the error is centimetres — and it costs
+ * one cosine instead of one per candidate.
+ */
+export function distanceMetres(a: Position, b: Position): number {
+  const meanLat = ((a[1] + b[1]) / 2) * (Math.PI / 180);
+  const dx = (a[0] - b[0]) * M_PER_DEG_LAT * Math.cos(meanLat);
+  const dy = (a[1] - b[1]) * M_PER_DEG_LAT;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * The nearest named village to a point, with how far away it is.
+ *
+ * The distance is the whole point of the return value. A village 200 m away is
+ * a useful label for where something happened; one 6 km away means the map has
+ * no village near that point and saying its name would mislead. Callers decide
+ * the threshold, because what counts as "near" differs between a report form
+ * and a case summary.
+ */
+export function nearestVillage(pt: Position): { village: Village; distanceM: number } | null {
+  let best: Village | null = null;
+  let bestDistance = Infinity;
+  for (const village of loadVillages()) {
+    const d = distanceMetres(pt, [village.lng, village.lat]);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = village;
+    }
+  }
+  return best ? { village: best, distanceM: bestDistance } : null;
 }
 
 export { computeBbox };

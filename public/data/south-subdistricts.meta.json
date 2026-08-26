@@ -1,0 +1,31 @@
+{
+  "layer": "south-subdistricts",
+  "owner": "กรมป้องกันและบรรเทาสาธารณภัย (DDPM)",
+  "published_via": "DDPM GIS Portal",
+  "access_method": "REST API (ArcGIS FeatureServer query, f=geojson)",
+  "source_url": "https://gis-portal.disaster.go.th/arcgis/rest/services/MapDX/DPM_TH_Boundary/MapServer/3/query?where=PROV_CODE+IN+%28%2790%27%2C%2794%27%2C%2795%27%2C%2796%27%29&outFields=TAM_CODE%2CTAM_NAM_T%2CTAM_NAM_E%2CAMP_CODE%2CAMP_NAM_T%2CPROV_CODE%2CPROV_NAM_T&outSR=4326&f=geojson",
+  "fetched_at": "2026-08-26T02:56:21.442Z",
+  "crs": "EPSG:4326",
+  "encoding": "UTF-8",
+  "feature_count": 377,
+  "parts_merged": 2,
+  "simplify": {
+    "algorithm": "douglas-peucker",
+    "tolerance": 0.0006,
+    "highQuality": true
+  },
+  "size_bytes": {
+    "source": 4463797,
+    "published": 795753
+  },
+  "field_mapping": [
+    "TAM_CODE",
+    "TAM_NAM_T",
+    "TAM_NAM_E",
+    "AMP_CODE",
+    "AMP_NAM_T",
+    "PROV_CODE",
+    "PROV_NAM_T"
+  ],
+  "notes": "ตรวจสอบเงื่อนไขการใช้งานกับ DDPM ก่อนเผยแพร่ซ้ำ ไฟล์นี้ถูก simplify แล้วจึงไม่เหมาะกับการวัดพื้นที่หรืองานที่ต้องการความแม่นยำเชิงตำแหน่ง"
+}
