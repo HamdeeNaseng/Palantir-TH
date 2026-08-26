@@ -30,4 +30,3 @@ scripts/sync-mongo.ts
 scripts/import-verified-events-*.ts
 
 .claude
-
