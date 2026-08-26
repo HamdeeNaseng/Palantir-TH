@@ -33,6 +33,9 @@ npm run dev            # http://localhost:3000
 | `npm run build` | production build (เขียนลง `.next-build/`) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:seed` | seed ข้อมูลตัวอย่าง — ต่อท้าย `-- --force` เพื่อ reseed |
+| `npm run test:e2e` | Playwright — GPS จำลอง + mobile viewport (เปิด dev server ให้เอง บน `.next-e2e/`) |
+| `npm run gis:fetch` | ดึงขอบเขต DDPM (จังหวัด/อำเภอ/ตำบล) — `-- --only=<layer>` เพื่อดึงเฉพาะชั้นเดียว |
+| `npm run gis:villages` | ดึงจุดหมู่บ้านจาก OpenStreetMap (ODbL) — ไม่ใช่ข้อมูลทางการ ครอบคลุมไม่ครบ |
 
 dev กับ build แยก `distDir` กันเพื่อไม่ให้แย่ง file handle บน `.next/trace`
 เวลารัน build ขณะที่ dev server ยังทำงานอยู่ (ดู `next.config.ts`)
@@ -57,6 +60,8 @@ src/
 │   ├── case/…                   alias ของ /cases (redirect, เผื่อพิมพ์เอกพจน์)
 │   ├── report/page.tsx          รายงานจากประชาชน — ตารางเดิม กรองเฉพาะ src_citizen + ฟอร์มแจ้งเหตุ
 │   ├── events/page.tsx          เหตุการณ์ — ไทม์ไลน์เล่นย้อนหลัง (server component, อ่าน searchParams)
+│   ├── map/page.tsx             แผนที่ภาพรวม — ความหนาแน่นรายจังหวัด/อำเภอ/ตำบล ตามระดับซูม
+│   ├── api/map/events/route.ts  จุดเหตุการณ์สำหรับ /map (ดึงเมื่อเปิดชั้นจุดเท่านั้น ~6 MB)
 │   ├── (stub)/…                 แท็บอื่นในแถบนำทาง ยังไม่ได้สร้าง
 │   └── globals.css              design tokens (Tailwind v4 @theme)
 ├── components/
@@ -66,7 +71,9 @@ src/
 │   ├── cases/                   CaseFilterSidebar, CaseSearchBar, CaseTable,
 │   │                            CasePagination, CaseLocationMap, MediaThumb —
 │   │                            ใช้ร่วมกับ /cases และ /report ผ่าน prop `basePath`
-│   ├── report/                  ReportIntakeSection (ยุบ/ขยาย), ReportForm
+│   ├── report/                  ReportIntakeSection (ยุบ/ขยาย), ReportForm,
+│   │                            ReportLocationPicker (GPS + ปักหมุด + ดาวเทียม)
+│   ├── map/                     MapWorkspace — choropleth สามระดับ + อันดับพื้นที่
 │   ├── events/                  EventsWorkspace (state owner), EventsFilterSidebar, EventsKpiRow,
 │   │                            TimelinePanel, EventsTrendPanel, RecentPlayedPanel,
 │   │                            PhenomenaSummaryPanel, InspectSummaryPanel
@@ -76,6 +83,8 @@ src/
 │   ├── filters.ts               parse/serialize ตัวกรองหน้าสืบสวน/เหตุการณ์ <-> URL
 │   ├── case-filters.ts          เช่นเดียวกัน แต่ของทะเบียนเคส/รายงาน (ใช้ร่วมกันทั้งสองหน้า)
 │   ├── report-form.ts           ค่าคงที่ + shape ของฟอร์มแจ้งเหตุ ไม่แตะ node:fs/MongoDB
+│   ├── report-schema.ts         Zod schema ของฟอร์มแจ้งเหตุ (รูปแบบ ไม่ใช่ภูมิศาสตร์)
+│   ├── basemap.ts               ชั้นภาพถ่ายดาวเทียม (ปิดอยู่ตั้งแต่แรก ตั้งค่าผ่าน env)
 │   ├── stats.ts                 Poisson/bucketing แบบ isomorphic — ใช้ทั้งฝั่ง server และ client
 │   ├── events-replay.ts         สถิติที่ขึ้นกับตำแหน่ง playhead (client-side, ไม่ round-trip ทุก tick)
 │   ├── datetime.ts              จัดรูปแบบวันที่ ตรึง timezone ไว้ที่ Asia/Bangkok
