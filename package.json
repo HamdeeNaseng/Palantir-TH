@@ -28,8 +28,8 @@
     "mongo:sync:pilot": "tsx scripts/sync-mongo.ts"
   },
   "engines": {
-    "node": "24.14.x",
-    "npm": "11.16.x"
+    "node": "24.x",
+    "npm": "11.x"
   },
   "packageManager": "npm@11.16.0",
   "dependencies": {
