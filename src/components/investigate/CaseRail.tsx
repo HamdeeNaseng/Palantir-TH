@@ -9,6 +9,13 @@ import {
   IconUsers,
 } from "@tabler/icons-react";
 import { RiskMeter } from "@/components/charts/Gauges";
+import {
+  CASE_STATUS_COLOR,
+  CASE_STATUS_LABEL,
+  SEVERITY_COLOR,
+  SEVERITY_LABEL,
+  riskBand,
+} from "@/lib/labels";
 import type { CaseDoc } from "@/lib/types";
 
 const UPDATE_TAG = {
@@ -45,6 +52,12 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
     );
   }
 
+  // Every one of these used to be a literal in the markup — the chip always
+  // read "กำลังสืบสวน", the severity always "วิกฤต", the risk always "สูงมาก",
+  // whatever the case document actually said.
+  const statusColor = CASE_STATUS_COLOR[activeCase.status];
+  const risk = riskBand(activeCase.risk_score);
+
   const entities = [
     { icon: IconUser, label: "บุคคล", n: activeCase.entities.people },
     { icon: IconUsers, label: "กลุ่ม", n: activeCase.entities.groups },
@@ -72,7 +85,16 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
             <h3 className="text-[13px] leading-snug font-semibold text-ink">{activeCase.title}</h3>
             <p className="num mt-0.5 text-[11.5px] text-ink-dim">{activeCase.code}</p>
           </div>
-          <span className="chip shrink-0 border-amber/60 bg-amber/15 text-amber">กำลังสืบสวน</span>
+          <span
+            className="chip shrink-0"
+            style={{
+              color: statusColor,
+              borderColor: `${statusColor}99`,
+              background: `${statusColor}26`,
+            }}
+          >
+            {CASE_STATUS_LABEL[activeCase.status]}
+          </span>
         </div>
 
         <div className="mt-2.5">
@@ -81,14 +103,22 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
           <Row label="ประเภทเหตุ">{activeCase.event_type}</Row>
           <Row label="ระดับความรุนแรง">
             <span className="flex items-center gap-1.5">
-              <span className="text-danger">วิกฤต</span>
+              <span style={{ color: SEVERITY_COLOR[activeCase.severity] }}>
+                {SEVERITY_LABEL[activeCase.severity]}
+              </span>
               {Array.from({ length: 5 }, (_, i) => (
                 <span
                   key={i}
                   className="h-2 w-2 rounded-full"
                   style={{
-                    background: i < activeCase.severity ? "#ef4444" : "rgba(56,100,150,0.4)",
-                    boxShadow: i < activeCase.severity ? "0 0 5px #ef4444" : undefined,
+                    background:
+                      i < activeCase.severity
+                        ? SEVERITY_COLOR[activeCase.severity]
+                        : "rgba(56,100,150,0.4)",
+                    boxShadow:
+                      i < activeCase.severity
+                        ? `0 0 5px ${SEVERITY_COLOR[activeCase.severity]}`
+                        : undefined,
                   }}
                 />
               ))}
@@ -101,7 +131,9 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
               {activeCase.risk_score}
               <span className="text-[11px] text-ink-muted"> / 100</span>
             </span>
-            <span className="text-[11px] font-medium text-danger">สูงมาก</span>
+            <span className="text-[11px] font-medium" style={{ color: risk.color }}>
+              {risk.label}
+            </span>
           </div>
         </div>
       </div>
