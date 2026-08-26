@@ -6,19 +6,19 @@ import type {
 } from "maplibre-gl";
 
 /**
- * The satellite basemap.
+ * The satellite basemap — the default view for every map in this app.
  *
- * Every map in this app draws administrative polygons and nothing else, on
- * purpose: no tile provider key is configured, and depending on one would put
- * an external request and a terms-of-service obligation behind every page
- * view. That reasoning still holds for the *default* view, so this layer ships
- * hidden. MapLibre requests no tile at all until someone turns it on, and the
- * pages render exactly as they did before for anyone who never does.
+ * It is on by default because of the thing the administrative polygons cannot
+ * give: ground truth. An อำเภอ outline says nothing about whether a pin sits
+ * on a road, a school, or a rubber plantation — and for a citizen placing that
+ * pin from a phone, the imagery is often the only way to recognise where they
+ * are. The polygons-only view is still one toggle away.
  *
- * What it buys when turned on is the thing the polygons cannot give: ground
- * truth. An อำเภอ outline says nothing about whether a pin sits on a road, a
- * school, or a rubber plantation — and for a citizen placing that pin from a
- * phone, the imagery is often the only way to recognise where they are.
+ * The cost of that default is real and worth stating: every page view now
+ * fetches third-party tiles and inherits that provider's terms. Set
+ * `NEXT_PUBLIC_SATELLITE_TILE_URL` (or a MapTiler key) to control which
+ * provider that is, and flip `SATELLITE_DEFAULT_ON` to ship the keyless
+ * polygon view again.
  *
  * The provider is resolved in three steps, most explicit first:
  *
@@ -38,6 +38,12 @@ import type {
 
 export const SATELLITE_SOURCE_ID = "satellite";
 export const SATELLITE_LAYER_ID = "satellite";
+
+/**
+ * Whether every map opens with the imagery already on. The toggle in each map
+ * still flips it; this is only the state it starts in.
+ */
+export const SATELLITE_DEFAULT_ON = true;
 
 const ESRI_TILE_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -109,9 +115,9 @@ export function satelliteLayer(): LayerSpecification {
     id: SATELLITE_LAYER_ID,
     type: "raster",
     source: SATELLITE_SOURCE_ID,
-    // Hidden until asked for — this is what keeps the default view free of
-    // third-party requests.
-    layout: { visibility: "none" },
+    // On by default: imagery is what makes a pin legible to a citizen, so it
+    // is the view every map opens with. The toggle turns it off.
+    layout: { visibility: SATELLITE_DEFAULT_ON ? "visible" : "none" },
     paint: { "raster-opacity": 1 },
   };
 }
