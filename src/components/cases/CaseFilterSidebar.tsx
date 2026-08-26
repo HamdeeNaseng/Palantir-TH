@@ -146,7 +146,7 @@ export default function CaseFilterSidebar({
       : facets.districts.filter((d) => d.province === "" || selectedNames.has(d.province));
 
   return (
-    <aside className="flex w-[212px] shrink-0 flex-col border-r border-[rgba(37,66,102,0.55)] bg-[#070e1b]">
+    <aside className="hidden w-[212px] shrink-0 flex-col border-r border-[rgba(37,66,102,0.55)] bg-[#070e1b] lg:flex">
       <div className="flex items-center justify-between border-b border-[rgba(37,66,102,0.55)] px-3.5 py-2.5">
         <h2 className="text-[13px] font-semibold text-ink">ตัวกรองเคส</h2>
         <button

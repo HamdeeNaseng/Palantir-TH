@@ -2,22 +2,30 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { COLLECTIONS, getDb } from "@/lib/mongodb";
-import { PROVINCE_BY_CODE } from "@/lib/geo";
-import { districtsOfProvince, representativePoint, type District } from "@/lib/geography";
-import { EVENT_TYPE_LABEL } from "@/lib/labels";
+import { PROVINCE_BY_CODE, PROVINCE_BY_DDPM } from "@/lib/geo";
 import {
-  HONEYPOT_FIELD,
-  REPORT_EVENT_TYPES,
-  REPORT_LIMITS,
-  REPORT_MIN_DATE,
-  type ReportFieldName,
-  type ReportFormState,
-} from "@/lib/report-form";
+  districtAt,
+  districtsOfProvince,
+  nearestVillage,
+  representativePoint,
+  subdistrictAt,
+  type District,
+} from "@/lib/geography";
+import { EVENT_TYPE_LABEL } from "@/lib/labels";
+import { pinGeoPrecision, REPORT_PIN, type ReportFormState } from "@/lib/report-form";
+import {
+  isHoneypotFilled,
+  readReportForm,
+  reportSchema,
+  toFieldErrors,
+  type FieldErrors,
+  type ReportInput,
+} from "@/lib/report-schema";
 import type {
   CitizenReportDoc,
   EventCandidateDoc,
   EventMedia,
-  EventType,
+  GeoPrecision,
   IngestionRunDoc,
   ProvinceCode,
   RawRecordDoc,
@@ -40,9 +48,15 @@ import type {
  * public case-detail page at `/cases/[id]`. Collecting contact details would
  * mean deciding where they may and may not be displayed, which is a real
  * design problem this app has no authentication model to support yet.
+ *
+ * The map pin is held to the same rule. A GPS fix taken at the scene is very
+ * often a fix on the person filing the report, and every coordinate stored
+ * here is published. So the browser snaps the pin to the ~110 m grid in
+ * `REPORT_PIN` before submitting, this action snaps it again on arrival, and
+ * the exact coordinate is never written down — not in `event_candidates`, and
+ * not in the raw record either.
  */
 
-const VALID_EVENT_TYPES = new Set(REPORT_EVENT_TYPES.map((t) => t.value));
 const VALID_PROVINCES = new Set(["pattani", "yala", "narathiwat", "songkhla"] as const);
 
 /** Deterministic across retries so a stringified object always hashes the same. */
@@ -66,142 +80,57 @@ function guessMediaKind(url: string): EventMedia["kind"] {
   return "other";
 }
 
-/** `http(s)` only — an `<a href>` on the case page will otherwise execute it. */
-function parseMediaUrl(raw: string): string | null {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-interface ValidatedReport {
-  eventType: EventType;
-  title: string;
-  description: string | null;
-  occurredAt: Date;
-  precision: "minute" | "day";
-  provinceCode: ProvinceCode;
-  district: District;
-  subdistrict: string | null;
-  place: string | null;
-  killed: number | null;
-  injured: number | null;
-  mediaUrls: string[];
-}
-
-type FieldErrors = Partial<Record<ReportFieldName, string>>;
-
-function str(formData: FormData, key: string): string {
-  const v = formData.get(key);
-  return typeof v === "string" ? v.trim() : "";
-}
-
-/** Empty means "not reported" — never coerced to zero. */
-function optionalCount(formData: FormData, key: string, errors: FieldErrors): number | null {
-  const raw = str(formData, key);
-  if (!raw) return null;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0 || n > REPORT_LIMITS.casualtyMax) {
-    errors[key as ReportFieldName] = `กรอกเป็นจำนวนเต็ม 0–${REPORT_LIMITS.casualtyMax}`;
-    return null;
-  }
-  return n;
-}
-
 /**
- * Read and validate every field. Rejects rather than guesses: an unlisted
- * province, an อำเภอ that is not really in that province, or a non-http(s)
- * evidence link all come back as a field error instead of being coerced into
- * something that merely looks plausible.
+ * Resolves a submission that has already passed `reportSchema` into the real
+ * geography it claims.
+ *
+ * A pin outranks the จังหวัด/อำเภอ selects rather than being checked against
+ * them. The polygons decide which อำเภอ contains a point, so re-deriving is
+ * both the stricter answer and the only one that keeps `location.district`
+ * consistent with `location.geo` — which `validate-events` enforces.
  */
-function validate(formData: FormData): { data: ValidatedReport } | { errors: FieldErrors } {
-  const errors: FieldErrors = {};
-
-  const eventTypeRaw = str(formData, "eventType");
-  const eventType = VALID_EVENT_TYPES.has(eventTypeRaw as EventType)
-    ? (eventTypeRaw as EventType)
-    : null;
-  if (!eventType) errors.eventType = "กรุณาเลือกประเภทเหตุการณ์";
-
-  const title = str(formData, "title");
-  if (!title) errors.title = "กรุณากรอกหัวข้อ";
-  else if (title.length > REPORT_LIMITS.title) errors.title = `ยาวเกิน ${REPORT_LIMITS.title} ตัวอักษร`;
-
-  const description = str(formData, "description");
-  if (description.length > REPORT_LIMITS.description) {
-    errors.description = `ยาวเกิน ${REPORT_LIMITS.description} ตัวอักษร`;
-  }
-
-  const occurredDate = str(formData, "occurredDate");
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredDate)) {
-    errors.occurredDate = "กรุณาระบุวันที่";
-  } else if (occurredDate > today) {
-    errors.occurredDate = "วันที่เกิดเหตุต้องไม่ใช่อนาคต";
-  } else if (occurredDate < REPORT_MIN_DATE) {
-    errors.occurredDate = `ต้องไม่ก่อน ${REPORT_MIN_DATE}`;
-  }
-
-  const occurredTimeRaw = str(formData, "occurredTime");
-  const occurredTime = /^\d{2}:\d{2}$/.test(occurredTimeRaw) ? occurredTimeRaw : "";
-  if (occurredTimeRaw && !occurredTime) errors.occurredTime = "รูปแบบเวลาไม่ถูกต้อง";
-
-  const provinceCodeRaw = str(formData, "provinceCode");
-  const provinceCode = VALID_PROVINCES.has(provinceCodeRaw as never)
-    ? (provinceCodeRaw as ProvinceCode)
-    : null;
-  if (!provinceCode) errors.provinceCode = "กรุณาเลือกจังหวัด";
-
-  const districtCode = str(formData, "districtCode");
-  // `districtsOfProvince` joins on the DDPM numeric code, not this app's
-  // `ProvinceCode` string — see `PROVINCE_BY_CODE` in lib/geo.ts.
-  const ddpmCode = provinceCode ? PROVINCE_BY_CODE.get(provinceCode)?.ddpmCode : undefined;
-  const district = ddpmCode
-    ? districtsOfProvince(ddpmCode).find((d) => d.code === districtCode)
-    : undefined;
-  if (provinceCode && !district) errors.districtCode = "กรุณาเลือกอำเภอจากรายการ";
-
-  const subdistrict = str(formData, "subdistrict").slice(0, REPORT_LIMITS.subdistrict);
-  const place = str(formData, "place").slice(0, REPORT_LIMITS.place);
-
-  const killed = optionalCount(formData, "killed", errors);
-  const injured = optionalCount(formData, "injured", errors);
-
-  const mediaUrls: string[] = [];
-  for (const raw of formData.getAll("mediaUrl")) {
-    const v = typeof raw === "string" ? raw.trim() : "";
-    if (!v) continue;
-    if (v.length > REPORT_LIMITS.mediaUrlLength || mediaUrls.length >= REPORT_LIMITS.mediaUrls) continue;
-    const parsed = parseMediaUrl(v);
-    if (parsed) mediaUrls.push(parsed);
-    else errors.mediaUrls = "ลิงก์หลักฐานต้องขึ้นต้นด้วย http:// หรือ https://";
-  }
-
-  if (Object.keys(errors).length > 0 || !eventType || !provinceCode || !district) {
-    return { errors };
-  }
-
-  const occurredAt = new Date(`${occurredDate}T${occurredTime || "00:00"}:00+07:00`);
-
-  return {
-    data: {
-      eventType,
-      title,
-      description: description || null,
-      occurredAt,
-      precision: occurredTime ? "minute" : "day",
+function resolvePlace(
+  input: ReportInput,
+):
+  | { provinceCode: ProvinceCode; district: District; subdistrict: string | null }
+  | { errors: FieldErrors } {
+  if (input.pin) {
+    const district = districtAt([input.pin.lng, input.pin.lat]);
+    const provinceCode = district
+      ? (PROVINCE_BY_DDPM.get(district.provinceCode)?.code ?? null)
+      : null;
+    if (!district || !provinceCode) {
+      return {
+        errors: {
+          pin: "หมุดไม่ได้อยู่ในเขตอำเภอใด — อาจอยู่ในทะเลหรือนอกพื้นที่ กรุณาปักใหม่",
+        },
+      };
+    }
+    // ตำบล comes from the polygons too, for the same reason อำเภอ does: it is
+    // the finest boundary DDPM publishes, and a name derived from geometry
+    // beats one typed from memory.
+    return {
       provinceCode,
       district,
-      subdistrict: subdistrict || null,
-      place: place || null,
-      killed,
-      injured,
-      mediaUrls,
-    },
-  };
+      subdistrict: subdistrictAt([input.pin.lng, input.pin.lat])?.nameTh ?? null,
+    };
+  }
+
+  const provinceCode = VALID_PROVINCES.has(input.provinceCode as never)
+    ? (input.provinceCode as ProvinceCode)
+    : null;
+  if (!provinceCode) return { errors: { provinceCode: "กรุณาเลือกจังหวัด" } };
+
+  // `districtsOfProvince` joins on the DDPM numeric code, not this app's
+  // `ProvinceCode` string — see `PROVINCE_BY_CODE` in lib/geo.ts.
+  const ddpmCode = PROVINCE_BY_CODE.get(provinceCode)?.ddpmCode;
+  const district = ddpmCode
+    ? districtsOfProvince(ddpmCode).find((d) => d.code === input.districtCode)
+    : undefined;
+  if (!district) return { errors: { districtCode: "กรุณาเลือกอำเภอจากรายการ" } };
+
+  // With no pin there is no geometry to ask, so the reporter's own words stand.
+  return { provinceCode, district, subdistrict: input.subdistrict };
 }
 
 /**
@@ -242,19 +171,40 @@ export async function submitCitizenReport(
   // Bots fill every field, including ones no citizen would see; pretend to
   // succeed without writing anything, so the trap costs the sender nothing to
   // learn it exists.
-  if (str(formData, HONEYPOT_FIELD)) {
+  if (isHoneypotFilled(formData)) {
     return { status: "success", message: "ขอบคุณสำหรับการแจ้งเหตุ" };
   }
 
-  const result = validate(formData);
-  if ("errors" in result) {
+  const parsed = reportSchema.safeParse(readReportForm(formData));
+  if (!parsed.success) {
     return {
       status: "error",
       message: "กรุณาตรวจสอบข้อมูลที่กรอก",
-      fieldErrors: result.errors,
+      fieldErrors: toFieldErrors(parsed.error),
     };
   }
-  const r = result.data;
+  const r = parsed.data;
+
+  // Shape was settled by the schema; this is the separate question of whether
+  // the place named actually exists on the DDPM boundaries.
+  const place = resolvePlace(r);
+  if ("errors" in place) {
+    return { status: "error", message: "กรุณาตรวจสอบข้อมูลที่กรอก", fieldErrors: place.errors };
+  }
+  const { district, provinceCode, subdistrict } = place;
+
+  /**
+   * Nearest mapped หมู่บ้าน, recorded as context rather than as a location.
+   *
+   * OpenStreetMap has roughly a fifth of the villages in these four
+   * provinces, so this is stored with its distance and never substituted for
+   * the coordinate — a name 1.8 km away is a landmark, not an address.
+   */
+  const village = place.subdistrict && r.pin ? nearestVillage([r.pin.lng, r.pin.lat]) : null;
+
+  // Bangkok time: the wall clock the reporter read, not the server's.
+  const occurredAt = new Date(`${r.occurredDate}T${r.occurredTime || "00:00"}:00+07:00`);
+  const precision = r.occurredTime ? "minute" : "day";
 
   let db: Awaited<ReturnType<typeof getDb>>;
   try {
@@ -266,23 +216,34 @@ export async function submitCitizenReport(
     };
   }
 
-  const district = r.district;
-  const [lng, lat] = representativePoint(district.geometry);
-  const provinceName = PROVINCE_BY_CODE.get(r.provinceCode)?.name ?? r.provinceCode;
+  // With no pin the point is the อำเภอ's representative point, and it has to be
+  // *exactly* that: `validate-events` layer 5 treats a district-precision
+  // record sitting anywhere else as a coordinate misrepresenting itself.
+  const [lng, lat] = r.pin ? [r.pin.lng, r.pin.lat] : representativePoint(district.geometry);
+  const geoPrecision: GeoPrecision = r.pin ? pinGeoPrecision(r.pin.accuracyM) : "district";
+  const provinceName = PROVINCE_BY_CODE.get(provinceCode)?.name ?? provinceCode;
 
   const raw = {
     title: r.title,
     description: r.description,
     event_type_hint: r.eventType,
-    occurred_at: r.occurredAt.toISOString(),
-    time_precision: r.precision,
+    occurred_at: occurredAt.toISOString(),
+    time_precision: precision,
     province: provinceName,
     district: district.nameTh,
-    subdistrict: r.subdistrict,
+    subdistrict,
     place: r.place,
+    nearest_village: village && village.distanceM <= 2000 ? village.village.nameTh : null,
+    nearest_village_distance_m: village && village.distanceM <= 2000 ? Math.round(village.distanceM) : null,
     killed: r.killed,
     injured: r.injured,
     media_urls: r.mediaUrls,
+    // GeoJSON order — [longitude, latitude] — matching what is stored below.
+    coordinates: r.pin ? [lng, lat] : null,
+    coordinate_source: r.pin ? r.pin.source : null,
+    // The grid it was rounded onto, so a reader of the archive knows.
+    coordinate_grid_m: r.pin ? REPORT_PIN.gridM : null,
+    gps_accuracy_m: r.pin?.accuracyM ?? null,
     submitted_via: "web_form",
   };
 
@@ -339,10 +300,11 @@ export async function submitCitizenReport(
     };
     await db.collection<IngestionRunDoc>(COLLECTIONS.ingestionRuns).insertOne(run);
 
-    const unreported = ["severity", "actors", "targets", "coordinates"];
+    const unreported = ["severity", "actors", "targets"];
+    if (!r.pin) unreported.push("coordinates");
     if (r.killed === null) unreported.push("casualties.killed");
     if (r.injured === null) unreported.push("casualties.injured");
-    if (!r.subdistrict) unreported.push("subdistrict");
+    if (!subdistrict) unreported.push("subdistrict");
     if (!r.place) unreported.push("place");
     if (!r.description) unreported.push("summary");
     if (r.mediaUrls.length === 0) unreported.push("media");
@@ -351,15 +313,15 @@ export async function submitCitizenReport(
       _id: evtId,
       source_id: "src_citizen",
       raw_record_id: rawId,
-      time: { start: r.occurredAt, precision: r.precision },
+      time: { start: occurredAt, precision },
       location: {
         province: provinceName,
-        provinceCode: r.provinceCode,
+        provinceCode,
         district: district.nameTh,
-        subdistrict: r.subdistrict,
+        subdistrict,
         place: r.place,
         geo: { type: "Point", coordinates: [lng, lat] },
-        geo_precision: "district",
+        geo_precision: geoPrecision,
       },
       event: {
         type: r.eventType,
@@ -388,7 +350,7 @@ export async function submitCitizenReport(
       _id: crId,
       reported_at: now,
       channel: "citizen",
-      provinceCode: r.provinceCode,
+      provinceCode,
       district: district.nameTh,
       topic: EVENT_TYPE_LABEL[r.eventType],
       became_fact: false,

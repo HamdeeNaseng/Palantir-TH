@@ -44,7 +44,12 @@ export default async function ReportPage({
   const backRef = `?ref=${encodeURIComponent(listPath)}`;
 
   return (
-    <div className="flex h-screen min-w-[1180px] flex-col overflow-hidden">
+    // Phone-first below `lg`, because this is the one page a citizen is
+    // expected to reach from a phone: the fixed-height analyst shell (which
+    // pins the table and scrolls only its inner panel) becomes an ordinary
+    // scrolling document, and the 1180px floor that the dense desktop layout
+    // needs only applies once there is room for it.
+    <div className="flex min-h-screen flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
       <TopNav active={BASE_PATH} />
 
       <div className="flex min-h-0 flex-1">
@@ -56,7 +61,7 @@ export default async function ReportPage({
           hideSourceFilter
         />
 
-        <main className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden bg-abyss p-2">
+        <main className="flex min-w-0 flex-1 flex-col gap-2 bg-abyss p-2 lg:overflow-hidden">
           <ReportIntakeSection districtsByProvince={districtsByProvince} />
 
           <section className="panel shrink-0 overflow-visible">
