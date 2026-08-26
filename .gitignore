@@ -19,8 +19,12 @@ next-env.d.ts
 
 # Local raw-source archive (re-fetchable, can be large)
 data/raw/
+pilot.env
 
 # Playwright
 /test-results/
 /playwright-report/
 /.next-e2e/
+scripts/test-atlas.ts
+scripts/sync-mongo.ts
+scripts/import-verified-events-*.ts

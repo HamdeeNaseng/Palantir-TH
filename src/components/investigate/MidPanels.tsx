@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 import StackedArea from "@/components/charts/StackedArea";
 import { ScoreBar } from "@/components/charts/Gauges";
+import { SEVERITY_COLOR } from "@/lib/labels";
 import type { InvestigationDashboard } from "@/server/investigate";
 
 function PanelHead({ title, action }: { title: string; action?: React.ReactNode }) {
@@ -269,7 +270,7 @@ export function SeverityPill({ level, label }: { level: number; label: string })
     );
   }
 
-  const color = ["", "#22c55e", "#84cc16", "#f59e0b", "#f97316", "#ef4444"][level];
+  const color = SEVERITY_COLOR[level];
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color }}>
       <span
