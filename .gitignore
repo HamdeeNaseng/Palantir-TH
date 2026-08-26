@@ -28,3 +28,16 @@ pilot.env
 scripts/test-atlas.ts
 scripts/sync-mongo.ts
 scripts/import-verified-events-*.ts
+
+.claude
+
+client_secret_443986413848-n8st72rtmns3qrcgjevingpp8g2i7cff.apps.googleusercontent.com.json
+
+# Agent skills installed from the internet (`npx skills add`). The content is
+# reproducible from skills-lock.json, which records each skill's source repo and
+# a content hash — tracking ~47K lines of vendored markdown instead would bury
+# every real diff. Skills written for this project are the exception and must be
+# added below by hand.
+.agents/skills/*
+!.agents/skills/agent-commit/
+!.agents/skills/citizen-geo-report/
