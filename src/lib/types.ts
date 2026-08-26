@@ -338,4 +338,10 @@ export interface CitizenReportDoc {
   topic: string;
   /** Did this report later get promoted to a verified fact? */
   became_fact: boolean;
+  /**
+   * reCAPTCHA v3 score, 0.0 (bot) to 1.0 (human). Absent on every report filed
+   * before the captcha existed, and whenever it is unconfigured or Google was
+   * unreachable — so a missing value means "not measured", never "suspicious".
+   */
+  captcha_score?: number;
 }
