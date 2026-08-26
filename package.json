@@ -11,6 +11,7 @@
     "check:env": "node scripts/check-environment.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "gis:fetch": "tsx scripts/fetch-boundaries.ts",
+    "gis:villages": "tsx scripts/fetch-villages.ts",
     "gis:validate": "node scripts/validate-boundaries.mjs && tsx scripts/validate-events.ts",
     "gis:boundaries": "npm run gis:fetch && npm run gis:validate",
     "check": "npm run check:env && npm run gis:validate && npm run typecheck && npm run build",
@@ -21,7 +22,9 @@
     "ingest:research": "tsx scripts/import-research-batch.ts",
     "ingest:recent": "tsx scripts/enrich-recent-window.ts",
     "ingest:verified": "tsx scripts/ingest-verified.ts",
-    "ingest:police75": "tsx scripts/import-75-case-register.ts"
+    "ingest:police75": "tsx scripts/import-75-case-register.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "engines": {
     "node": "24.14.x",
@@ -34,9 +37,12 @@
     "mongodb": "^6.12.0",
     "next": "^15.5.4",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-map-gl": "8.1.2",
+    "zod": "4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4.1.13",
     "@turf/simplify": "^7.4.0",
     "@types/node": "^22.10.0",
