@@ -1,4 +1,5 @@
-import { EVENT_TYPE_LABEL, SEVERITY_LABEL } from "@/lib/labels";
+import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL, SEVERITY_LABEL } from "@/lib/labels";
+import { EVENT_FAMILY_COLOR } from "@/lib/palette";
 import { PROVINCES } from "@/lib/geo";
 import { DEFAULT_FILTERS, type InvestigationFilters } from "@/lib/filters";
 import {
@@ -10,6 +11,8 @@ import {
   detectHotspots as detectHotspotsGeneric,
   rollingMean,
   thaiShortDate,
+  type Bucket,
+  type BucketUnit,
   type HotspotItem,
 } from "@/lib/stats";
 import {
@@ -19,7 +22,14 @@ import {
   type EventFeature,
   type EventFeatureCollection,
 } from "./shared-events";
-import type { CaseDoc, CitizenReportDoc, EventCandidateDoc, EventType } from "@/lib/types";
+import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
+import type {
+  CaseDoc,
+  CitizenReportDoc,
+  EventCandidateDoc,
+  EventFamily,
+  EventType,
+} from "@/lib/types";
 
 export interface KpiCard {
   key: string;
@@ -101,19 +111,56 @@ export interface InvestigationDashboard {
 
 // ----------------------------------------------------------------- aggregation
 
-const TREND_GROUPS: { key: string; label: string; color: string; types: EventType[] }[] = [
-  { key: "violence", label: "เหตุรุนแรง", color: "#3b82f6", types: ["unrest", "explosion", "shooting", "arson"] },
-  { key: "narcotics", label: "ยาเสพติด", color: "#22c55e", types: ["narcotics"] },
-  { key: "crime", label: "อาชญากรรม", color: "#f59e0b", types: ["crime"] },
-  { key: "gang", label: "กิจกรรมกลุ่ม", color: "#a855f7", types: ["gang", "abduction"] },
-  { key: "other", label: "อื่น ๆ", color: "#64748b", types: ["raid", "other"] },
-];
+/**
+ * The trend chart's series, one per family.
+ *
+ * Derived rather than listed: this used to be a hand-written partition of the
+ * event vocabulary, which meant a new category silently fell out of the chart
+ * — counted nowhere, and looking like a quiet week rather than a missing
+ * series. `EVENT_FAMILY` covers every type by construction, so it cannot.
+ */
+const TREND_GROUPS: { key: EventFamily; label: string; color: string; types: EventType[] }[] =
+  EVENT_FAMILIES.map((family) => ({
+    key: family,
+    label: EVENT_FAMILY_LABEL[family],
+    color: EVENT_FAMILY_COLOR[family],
+    types: typesInFamily(family),
+  }));
+
+/**
+ * Counts events into the trend chart's own buckets.
+ *
+ * The KPI sparklines used to be a fixed 30-day daily series regardless of the
+ * selected range. At the default "ทั้งหมด" that drew the last 30 days — 44
+ * events — underneath a headline of 9,755, so the line said nothing about the
+ * number above it. Sharing the trend's buckets makes the spark cover exactly
+ * the span the KPI counts.
+ *
+ * `weight` lets a card whose headline is not an event count (claims sums
+ * `corroborating_sources`) plot its own quantity rather than event volume.
+ */
+function buildSpark(buckets: Bucket[], unit: BucketUnit) {
+  const index = new Map(buckets.map((b, i) => [b.key, i]));
+  return (events: EventCandidateDoc[], weight: (e: EventCandidateDoc) => number = () => 1) => {
+    const points: number[] = new Array(buckets.length).fill(0);
+    for (const e of events) {
+      const i = index.get(bucketKey(e.time.start, unit));
+      if (i !== undefined) points[i] += weight(e);
+    }
+    return points;
+  };
+}
 
 /**
  * `matched` is the current window; `previous` is the same filters shifted back
  * by one window length, so every delta is a like-for-like comparison.
+ * `spark` comes from `buildSpark`, bucketed to the selected range.
  */
-function buildKpis(matched: EventCandidateDoc[], previous: EventCandidateDoc[], now: Date): KpiCard[] {
+function buildKpis(
+  matched: EventCandidateDoc[],
+  previous: EventCandidateDoc[],
+  spark: ReturnType<typeof buildSpark>,
+): KpiCard[] {
   const claims = matched.reduce((s, e) => s + e.corroborating_sources.length, 0);
   const prevClaims = previous.reduce((s, e) => s + e.corroborating_sources.length, 0);
 
@@ -125,9 +172,6 @@ function buildKpis(matched: EventCandidateDoc[], previous: EventCandidateDoc[], 
     xs.length ? xs.reduce((s, e) => s + e.confidence, 0) / xs.length : 0;
   const confidence = Math.round(mean(matched));
   const confidenceDelta = Math.round(mean(matched) - mean(previous));
-
-  const spark = (xs: EventCandidateDoc[]) =>
-    dailyCounts(xs.map((e) => e.time.start.getTime()), 30, now.getTime());
 
   /** Signed percent change, clamped so a near-empty baseline can't print +2485%. */
   const delta = (nowCount: number, before: number) => {
@@ -156,7 +200,7 @@ function buildKpis(matched: EventCandidateDoc[], previous: EventCandidateDoc[], 
       delta: delta(claims, prevClaims),
       deltaTone: tone(claims, prevClaims),
       deltaNote: "จากช่วงก่อนหน้า",
-      spark: spark(matched),
+      spark: spark(matched, (e) => e.corroborating_sources.length),
       icon: "shield",
     },
     {
@@ -313,7 +357,39 @@ function buildTrend(events: EventCandidateDoc[], now: Date) {
     series,
     max,
     bucketLabel: BUCKET_LABEL[unit],
+    // Handed back so the KPI sparklines can share the same bins rather than
+    // inventing a second, unrelated time window.
+    buckets,
+    unit,
   };
+}
+
+/** How many rows the "รายการเหตุการณ์ล่าสุด" panel shows. */
+const RECENT_EVENTS_LIMIT = 14;
+
+/** Open cases outrank monitored ones, which outrank closed. */
+const CASE_STATUS_RANK: Record<CaseDoc["status"], number> = {
+  investigating: 0,
+  monitoring: 1,
+  closed: 2,
+};
+
+/**
+ * The rail showed `cases[0]` — whichever document the collection scan happened
+ * to return first, so "เคสที่กำลังติดตาม" could be a closed case while an open
+ * one sat behind it. Rank instead: still open, then highest risk, then most
+ * recent, with `_id` as a tiebreak so the rail doesn't swap between renders.
+ */
+function pickActiveCase(cases: CaseDoc[]): CaseDoc | null {
+  return (
+    [...cases].sort(
+      (a, b) =>
+        CASE_STATUS_RANK[a.status] - CASE_STATUS_RANK[b.status] ||
+        b.risk_score - a.risk_score ||
+        b.occurred_at.getTime() - a.occurred_at.getTime() ||
+        a._id.localeCompare(b._id),
+    )[0] ?? null
+  );
 }
 
 function buildNetwork(events: EventCandidateDoc[]) {
@@ -362,6 +438,7 @@ export async function getInvestigationDashboard(
 
   const trend = buildTrend(matched, now);
   const { labels: trendLabels, series, max: trendMax, bucketLabel } = trend;
+  const spark = buildSpark(trend.buckets, trend.unit);
 
   const CATEGORY_LABEL: Record<string, string> = {
     government: "หน่วยงานรัฐ",
@@ -376,7 +453,7 @@ export async function getInvestigationDashboard(
   return {
     live: bundle.live,
     filters,
-    kpis: buildKpis(matched, previous, now),
+    kpis: buildKpis(matched, previous, spark),
     // The whole matched set goes to the client: MapLibre renders points on the
     // GPU, so there is no reason to cap it the way a DOM-node map had to. The
     // heatmap layer derives density itself, so no pre-binning either.
@@ -397,19 +474,29 @@ export async function getInvestigationDashboard(
         category: CATEGORY_LABEL[s.trust.class] ?? s.trust.class,
         score: s.trust.score,
       })),
-    recentEvents: matched.slice(0, 14).map((e) => ({
-      id: e._id,
-      at: e.time.start,
-      type: EVENT_TYPE_LABEL[e.event.type],
-      district: e.location.district,
-      province: e.location.province,
-      severity: e.severity ?? 0,
-      severityLabel: e.severity === null ? "ไม่ระบุ" : SEVERITY_LABEL[e.severity],
-      source:
-        bundle.sources.find((s) => s._id === e.corroborating_sources[0])?.shortName ?? "ไม่ระบุ",
-    })),
+    // "ล่าสุด" has to mean it. Unsorted, this took `matched` in whatever order
+    // the collection scan returned, which put 2545-era records at the top of a
+    // panel headed "รายการเหตุการณ์ล่าสุด". `_id` breaks ties so the list is
+    // stable across renders instead of reshuffling equal timestamps.
+    recentEvents: [...matched]
+      .sort(
+        (a, b) =>
+          b.time.start.getTime() - a.time.start.getTime() || a._id.localeCompare(b._id),
+      )
+      .slice(0, RECENT_EVENTS_LIMIT)
+      .map((e) => ({
+        id: e._id,
+        at: e.time.start,
+        type: EVENT_TYPE_LABEL[e.event.type],
+        district: e.location.district,
+        province: e.location.province,
+        severity: e.severity ?? 0,
+        severityLabel: e.severity === null ? "ไม่ระบุ" : SEVERITY_LABEL[e.severity],
+        source:
+          bundle.sources.find((s) => s._id === e.corroborating_sources[0])?.shortName ?? "ไม่ระบุ",
+      })),
     citizen: buildCitizen(bundle.citizenReports, now),
-    activeCase: bundle.cases[0] ?? null,
+    activeCase: pickActiveCase(bundle.cases),
     totalMatched: matched.length,
   };
 }

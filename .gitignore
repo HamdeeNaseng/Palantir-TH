@@ -19,3 +19,8 @@ next-env.d.ts
 
 # Local raw-source archive (re-fetchable, can be large)
 data/raw/
+
+# Playwright
+/test-results/
+/playwright-report/
+/.next-e2e/

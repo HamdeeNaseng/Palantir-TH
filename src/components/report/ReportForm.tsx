@@ -7,6 +7,7 @@ import {
   IconCircleCheck,
   IconLink,
   IconLoader2,
+  IconMapPin,
   IconPlus,
   IconSend,
   IconX,
@@ -15,7 +16,8 @@ import { PROVINCES } from "@/lib/geo";
 import { toInputDate } from "@/lib/datetime";
 import {
   HONEYPOT_FIELD,
-  REPORT_EVENT_TYPES,
+  PIN_FIELDS,
+  REPORT_EVENT_GROUPS,
   REPORT_FORM_IDLE,
   REPORT_LIMITS,
   REPORT_MIN_DATE,
@@ -23,6 +25,7 @@ import {
 } from "@/lib/report-form";
 import type { ProvinceCode } from "@/lib/types";
 import { submitCitizenReport } from "@/server/report-intake";
+import ReportLocationPicker, { type PickedPin } from "./ReportLocationPicker";
 
 /**
  * The citizen intake form.
@@ -41,6 +44,10 @@ export default function ReportForm({
 }) {
   const [state, formAction, pending] = useActionState(submitCitizenReport, REPORT_FORM_IDLE);
   const [provinceCode, setProvinceCode] = useState<ProvinceCode | "">("");
+  const [districtCode, setDistrictCode] = useState("");
+  // A pin, once placed, is the location — the selects below step aside rather
+  // than offer a second, contradictable answer to the same question.
+  const [pin, setPin] = useState<PickedPin | null>(null);
   const [mediaCount, setMediaCount] = useState(1);
   const formId = useId();
 
@@ -80,7 +87,7 @@ export default function ReportForm({
   }
 
   return (
-    <form action={formAction} className="grid grid-cols-2 gap-x-4 gap-y-3 p-4">
+    <form action={formAction} className="grid grid-cols-1 gap-x-4 gap-y-3 p-4 sm:grid-cols-2">
       {/* Honeypot: off-screen, unreachable by tab, invisible to a sighted user —
           a legitimate submitter has no way to notice or fill this in. */}
       <input
@@ -93,7 +100,7 @@ export default function ReportForm({
       />
 
       {state.status === "error" && state.message && !state.fieldErrors && (
-        <div className="col-span-2 flex items-center gap-2 rounded border border-danger/40 bg-danger/10 px-3 py-2 text-[11.5px] text-danger">
+        <div className="sm:col-span-2 flex items-center gap-2 rounded border border-danger/40 bg-danger/10 px-3 py-2 text-[11.5px] text-danger">
           <IconAlertTriangle size={14} stroke={1.8} />
           {state.message}
         </div>
@@ -110,10 +117,14 @@ export default function ReportForm({
           <option value="" disabled>
             เลือกประเภท
           </option>
-          {REPORT_EVENT_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
+          {REPORT_EVENT_GROUPS.map((g) => (
+            <optgroup key={g.family} label={g.label}>
+              {g.types.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </Field>
@@ -133,7 +144,7 @@ export default function ReportForm({
         />
       </Field>
 
-      <Field label="หัวข้อสั้น ๆ" htmlFor={`${formId}-title`} error={state.fieldErrors?.title} required className="col-span-2">
+      <Field label="หัวข้อสั้น ๆ" htmlFor={`${formId}-title`} error={state.fieldErrors?.title} required className="sm:col-span-2">
         <input
           id={`${formId}-title`}
           type="text"
@@ -149,7 +160,7 @@ export default function ReportForm({
         label="รายละเอียดเพิ่มเติม (ถ้ามี)"
         htmlFor={`${formId}-description`}
         error={state.fieldErrors?.description}
-        className="col-span-2"
+        className="sm:col-span-2"
       >
         <textarea
           id={`${formId}-description`}
@@ -166,55 +177,113 @@ export default function ReportForm({
 
       <div />
 
-      <Field label="จังหวัด" htmlFor={`${formId}-provinceCode`} error={state.fieldErrors?.provinceCode} required>
-        <select
-          id={`${formId}-provinceCode`}
-          name="provinceCode"
-          required
-          defaultValue=""
-          onChange={(e) => setProvinceCode(e.target.value as ProvinceCode)}
-          className={selectClass}
-        >
-          <option value="" disabled>
-            เลือกจังหวัด
-          </option>
-          {PROVINCES.map((p) => (
-            <option key={p.code} value={p.code}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <div className="sm:col-span-2">
+        <span className="mb-1 block text-[11px] text-ink-dim">
+          ตำแหน่งที่เกิดเหตุ <span className="text-ink-muted">(ปักหมุดถ้าทราบจุดที่แน่ชัด)</span>
+        </span>
+        <ReportLocationPicker onChange={setPin} />
+        {state.fieldErrors?.pin && (
+          <p className="mt-1 flex items-center gap-1 text-[10.5px] text-danger">
+            <IconX size={10} stroke={2.5} />
+            {state.fieldErrors.pin}
+          </p>
+        )}
+        {pin && (
+          <>
+            <input type="hidden" name={PIN_FIELDS.lng} value={pin.lng} />
+            <input type="hidden" name={PIN_FIELDS.lat} value={pin.lat} />
+            <input type="hidden" name={PIN_FIELDS.source} value={pin.source} />
+            {pin.accuracyM !== null && (
+              <input type="hidden" name={PIN_FIELDS.accuracy} value={pin.accuracyM} />
+            )}
+          </>
+        )}
+      </div>
 
-      <Field label="อำเภอ" htmlFor={`${formId}-districtCode`} error={state.fieldErrors?.districtCode} required>
-        <select
-          id={`${formId}-districtCode`}
-          name="districtCode"
-          required
-          disabled={!provinceCode}
-          defaultValue=""
-          className={selectClass}
-        >
-          <option value="" disabled>
-            {provinceCode ? "เลือกอำเภอ" : "เลือกจังหวัดก่อน"}
-          </option>
-          {districts.map((d) => (
-            <option key={d.code} value={d.code}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-      </Field>
+      {pin ? (
+        // Not a disabled `<select>`: those submit nothing, and a locked control
+        // that still looks like a control invites the citizen to fight it. The
+        // อำเภอ shown here is the one the server will re-derive from the pin.
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-[rgba(37,66,102,0.8)] bg-[#0a1524] px-2.5 py-2">
+          <IconMapPin size={13} stroke={1.8} className="text-azure" />
+          <span className="text-[12px] text-ink">
+            จ.{pin.provinceName} · อ.{pin.districtName}
+          </span>
+          <span className="text-[10.5px] text-ink-muted">
+            อ่านจากหมุดบนแผนที่ — แก้ได้ด้วยการย้ายหมุด
+          </span>
+          <input type="hidden" name="provinceCode" value={pin.provinceCode} />
+          <input type="hidden" name="districtCode" value={pin.districtCode} />
+        </div>
+      ) : (
+        <>
+          <Field label="จังหวัด" htmlFor={`${formId}-provinceCode`} error={state.fieldErrors?.provinceCode} required>
+            <select
+              id={`${formId}-provinceCode`}
+              name="provinceCode"
+              required
+              value={provinceCode}
+              onChange={(e) => {
+                setProvinceCode(e.target.value as ProvinceCode);
+                setDistrictCode("");
+              }}
+              className={selectClass}
+            >
+              <option value="" disabled>
+                เลือกจังหวัด
+              </option>
+              {PROVINCES.map((p) => (
+                <option key={p.code} value={p.code}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
 
-      <Field label="ตำบล (ถ้าทราบ)" htmlFor={`${formId}-subdistrict`} error={state.fieldErrors?.subdistrict}>
-        <input
-          id={`${formId}-subdistrict`}
-          type="text"
-          name="subdistrict"
-          maxLength={REPORT_LIMITS.subdistrict}
-          className={inputClass}
-        />
-      </Field>
+          <Field label="อำเภอ" htmlFor={`${formId}-districtCode`} error={state.fieldErrors?.districtCode} required>
+            <select
+              id={`${formId}-districtCode`}
+              name="districtCode"
+              required
+              disabled={!provinceCode}
+              value={districtCode}
+              onChange={(e) => setDistrictCode(e.target.value)}
+              className={selectClass}
+            >
+              <option value="" disabled>
+                {provinceCode ? "เลือกอำเภอ" : "เลือกจังหวัดก่อน"}
+              </option>
+              {districts.map((d) => (
+                <option key={d.code} value={d.code}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </>
+      )}
+
+      {pin?.subdistrictName ? (
+        // Same rule as จังหวัด/อำเภอ: a pin has already answered this, and the
+        // server re-derives it from the polygons regardless of what is typed
+        // here, so offering a text box would only invite a contradiction.
+        <div>
+          <span className="mb-1 block text-[11px] text-ink-dim">ตำบล</span>
+          <p className="rounded border border-[rgba(37,66,102,0.8)] bg-[#0a1524] px-2.5 py-1.5 text-[12px] text-ink">
+            {pin.subdistrictName}
+          </p>
+        </div>
+      ) : (
+        <Field label="ตำบล (ถ้าทราบ)" htmlFor={`${formId}-subdistrict`} error={state.fieldErrors?.subdistrict}>
+          <input
+            id={`${formId}-subdistrict`}
+            type="text"
+            name="subdistrict"
+            maxLength={REPORT_LIMITS.subdistrict}
+            className={inputClass}
+          />
+        </Field>
+      )}
 
       <Field label="จุดสังเกต/สถานที่ (ถ้าทราบ)" htmlFor={`${formId}-place`} error={state.fieldErrors?.place}>
         <input id={`${formId}-place`} type="text" name="place" maxLength={REPORT_LIMITS.place} className={inputClass} />
@@ -228,7 +297,7 @@ export default function ReportForm({
         <input id={`${formId}-injured`} type="number" name="injured" min={0} className={inputClass} />
       </Field>
 
-      <div className="col-span-2">
+      <div className="sm:col-span-2">
         <div className="mb-1 flex items-center justify-between">
           <span className="text-[11px] text-ink-dim">ลิงก์หลักฐาน (ถ้ามี — ภาพ วิดีโอ หรือโพสต์)</span>
           {mediaCount < REPORT_LIMITS.mediaUrls && (
@@ -265,7 +334,7 @@ export default function ReportForm({
         )}
       </div>
 
-      <div className="col-span-2 flex items-center justify-between border-t border-[rgba(37,66,102,0.45)] pt-3">
+      <div className="sm:col-span-2 flex items-center justify-between border-t border-[rgba(37,66,102,0.45)] pt-3">
         <p className="max-w-[380px] text-[10.5px] leading-relaxed text-ink-muted">
           รายงานนี้จะถูกบันทึกในสถานะ &ldquo;อยู่ระหว่างตรวจสอบ&rdquo; และแสดงในตารางด้านล่างทันที
           ไม่มีการเก็บชื่อ เบอร์โทร หรืออีเมลของผู้แจ้ง

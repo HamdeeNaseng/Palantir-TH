@@ -1,0 +1,47 @@
+import type { Metadata } from "next";
+import TopNav from "@/components/layout/TopNav";
+import MapWorkspace from "@/components/map/MapWorkspace";
+import { parseFilters, serializeFilters } from "@/lib/filters";
+import { getMapOverview } from "@/server/map-overview";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "แผนที่ภาพรวม — Palantir TH",
+  description:
+    "ความหนาแน่นของเหตุการณ์รายจังหวัด อำเภอ และตำบล บนแผนที่เต็มจอ พร้อมภาพถ่ายดาวเทียมและจุดเหตุการณ์",
+};
+
+/**
+ * `/map` — the four provinces as one picture.
+ *
+ * Shares the URL filter grammar with `/investigate` and `/events` (`parseFilters`),
+ * so a filtered view can be carried between them by the query string alone. It
+ * deliberately has no filter sidebar of its own: this page is for the shape of
+ * the whole area, and 212 px of controls in front of it would be arguing with
+ * the one thing it exists to show.
+ */
+export default async function MapPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const filters = parseFilters(await searchParams);
+  const data = await getMapOverview(filters);
+
+  return (
+    <div className="flex h-screen min-w-[900px] flex-col overflow-hidden">
+      <TopNav active="/map" />
+
+      {!data.live && (
+        <p className="pointer-events-none fixed top-[46px] left-1/2 z-50 -translate-x-1/2 rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
+          ยังเชื่อมต่อ MongoDB ไม่ได้ — ให้รัน{" "}
+          <code className="font-mono">docker compose up -d</code> แล้ว{" "}
+          <code className="font-mono">npm run db:seed</code>
+        </p>
+      )}
+
+      <MapWorkspace data={data} eventsQuery={serializeFilters(filters)} />
+    </div>
+  );
+}

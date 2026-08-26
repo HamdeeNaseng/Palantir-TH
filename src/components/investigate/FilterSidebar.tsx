@@ -5,26 +5,27 @@ import { useRouter } from "next/navigation";
 import { IconCalendar, IconChevronDown, IconFilter, IconLoader2 } from "@tabler/icons-react";
 import { PROVINCES } from "@/lib/geo";
 import { EVENT_COLOR } from "@/lib/palette";
+import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
   serializeFilters,
   type InvestigationFilters,
 } from "@/lib/filters";
+import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
 import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
 
-const EVENT_TYPE_CHIPS: { value: EventType; label: string }[] = [
-  { value: "unrest", label: "เหตุไม่สงบ" },
-  { value: "shooting", label: "ยิง/ปะทะ" },
-  { value: "explosion", label: "ลอบวางระเบิด" },
-  { value: "arson", label: "วางเพลิง" },
-  { value: "raid", label: "ตรวจค้น/จับกุม" },
-  { value: "narcotics", label: "ยาเสพติด" },
-  { value: "abduction", label: "ลักพาตัว" },
-  { value: "crime", label: "อาชญากรรม" },
-  { value: "gang", label: "กิจกรรมกลุ่ม" },
-  { value: "other", label: "อื่น ๆ" },
-];
+/**
+ * Every category, grouped by family. Derived from the vocabulary rather than
+ * listed here: this used to be a second, hand-kept copy of the labels, and it
+ * had already drifted from `EVENT_TYPE_LABEL` in two places before the list
+ * grew to seventeen.
+ */
+const EVENT_TYPE_GROUPS = EVENT_FAMILIES.map((family) => ({
+  family,
+  label: EVENT_FAMILY_LABEL[family],
+  types: typesInFamily(family),
+}));
 
 const VERIFICATION_OPTIONS: { value: VerificationStatus; label: string }[] = [
   { value: "verified", label: "ยืนยันแล้ว" },
@@ -173,25 +174,32 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
           }
         >
           <div className="flex flex-wrap gap-1.5">
-            {EVENT_TYPE_CHIPS.map((c) => {
-              const on = f.eventTypes.includes(c.value);
-              const color = EVENT_COLOR[c.value];
-              return (
-                <button
-                  key={c.value}
-                  type="button"
-                  onClick={() => patch({ eventTypes: toggle<EventType>(f.eventTypes, c.value) })}
-                  className="chip"
-                  style={{
-                    color,
-                    borderColor: on ? color : `${color}55`,
-                    background: on ? `${color}26` : "transparent",
-                  }}
-                >
-                  {c.label}
-                </button>
-              );
-            })}
+            {EVENT_TYPE_GROUPS.map((g) => (
+              <div key={g.family} className="w-full">
+                <p className="mt-1 mb-1 text-[10px] text-ink-muted first:mt-0">{g.label}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {g.types.map((t) => {
+                    const on = f.eventTypes.includes(t);
+                    const color = EVENT_COLOR[t];
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => patch({ eventTypes: toggle<EventType>(f.eventTypes, t) })}
+                        className="chip"
+                        style={{
+                          color,
+                          borderColor: on ? color : `${color}55`,
+                          background: on ? `${color}26` : "transparent",
+                        }}
+                      >
+                        {EVENT_TYPE_LABEL[t]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </Section>
 

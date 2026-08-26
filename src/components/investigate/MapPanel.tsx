@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import * as maplibregl from "maplibre-gl";
-import type {
-  ExpressionSpecification,
-  FilterSpecification,
-  MapLayerMouseEvent,
-  StyleSpecification,
-} from "maplibre-gl";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Map, {
+  AttributionControl,
+  Layer,
+  Popup,
+  Source,
+  type LayerProps,
+  type MapLayerMouseEvent,
+  type MapRef,
+} from "react-map-gl/maplibre";
+import type { ExpressionSpecification, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   IconChevronDown,
@@ -17,10 +20,19 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
+  IconSatellite,
   IconStack2,
 } from "@tabler/icons-react";
 import { EVENT_COLOR } from "@/lib/palette";
-import { EVENT_TYPE_LABEL } from "@/lib/labels";
+import {
+  SATELLITE_SOURCE_ID,
+  satelliteLayer,
+  satelliteSource,
+  setSatelliteBasemap,
+  type BasemapFill,
+} from "@/lib/basemap";
+import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
+import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
 import type { EventFeatureCollection } from "@/server/investigate";
 
 /**
@@ -31,9 +43,18 @@ import type { EventFeatureCollection } from "@/server/investigate";
  * the event layer through WebGL, so the event count is bounded by the GPU
  * rather than by the DOM.
  *
- * There is deliberately no raster basemap: no tile provider key is configured,
- * and depending on one would add an external request and a terms-of-service
- * obligation for every page view. The administrative layers carry the map.
+ * Composed with react-map-gl, which is what lets the layers be declared rather
+ * than assembled: the replay filter, the view switcher and the optional
+ * time-path and cluster overlays are now props on a `<Layer>` instead of five
+ * effects reaching into a map instance after it loads. The popups are ordinary
+ * JSX for the same reason, which also retires the hand-rolled HTML escaping
+ * they used to need.
+ *
+ * The imagery basemap is still applied imperatively through the map ref — see
+ * lib/basemap.ts. It has to change paint on layers that belong to the base
+ * style rather than to this tree, and MapLibre's own setPaintProperty is the
+ * honest way to do that; re-issuing the whole style object on every toggle
+ * would make MapLibre diff (or worse, reload) a style that has not changed.
  */
 
 /** Fitted to the four provinces, with room for the legend overlay. */
@@ -55,13 +76,39 @@ const THAILAND_BOUNDS: [[number, number], [number, number]] = [
  */
 const FIT_PADDING = { top: 14, bottom: 74, left: 16, right: 170 };
 
-const SOUTH = { provinces: "/data/south-provinces.geojson", districts: "/data/south-districts.geojson" };
+const SOUTH = {
+  provinces: "/data/south-provinces.geojson",
+  districts: "/data/south-districts.geojson",
+  subdistricts: "/data/south-subdistricts.geojson",
+  villages: "/data/south-villages.geojson",
+};
+
+/**
+ * Zoom at which the two finest levels are worth their download.
+ *
+ * ตำบล is ~780 KB and หมู่บ้าน ~200 KB — together more than every other layer
+ * on this map combined, and both are illegible at province zoom. The sources
+ * are mounted (which is what fetches them) only once the view is close enough
+ * for them to mean something, and stay mounted afterwards so panning around at
+ * detail zoom does not re-fetch.
+ */
+const DETAIL_MIN_ZOOM = 10;
 /** The other 73 provinces, drawn dim so the focus area sits inside the country. */
 const THAILAND = "/data/thailand-provinces.geojson";
 
-const LEGEND = (
-  ["unrest", "shooting", "explosion", "arson", "abduction", "raid", "narcotics"] as const
-).map((t) => ({ type: t, label: EVENT_TYPE_LABEL[t], color: EVENT_COLOR[t] }));
+/**
+ * Every category the dots can take, grouped under its family.
+ *
+ * It used to be seven hand-picked types, which was already a legend that could
+ * not explain three of the colours on the map. At seventeen that is no longer
+ * a defensible shortcut: the family heading is what makes a long list readable
+ * — the eye finds "ภัยพิบัติธรรมชาติ" first and the exact hazard second.
+ */
+const LEGEND = EVENT_FAMILIES.map((family) => ({
+  family,
+  label: EVENT_FAMILY_LABEL[family],
+  types: typesInFamily(family).map((t) => ({ type: t, label: EVENT_TYPE_LABEL[t], color: EVENT_COLOR[t] })),
+}));
 
 const VIEWS = ["แผนที่", "ความหนาแน่น", "ไฮบริด"] as const;
 type View = (typeof VIEWS)[number];
@@ -77,6 +124,29 @@ const HEAT_RAMP: ExpressionSpecification = [
   1, "rgba(239,68,68,0.95)",
 ];
 
+/**
+ * Land/sea separation for the plain basemap. Named because the satellite
+ * toggle has to put them back, and a second literal copy of the ramp is
+ * exactly the kind of thing that drifts.
+ */
+const THAILAND_FILL_OPACITY = 0.85;
+const PROVINCE_FILL_OPACITY: ExpressionSpecification = [
+  "interpolate", ["linear"], ["zoom"],
+  4, 0.85,
+  8, 0.5,
+  11, 0.35,
+];
+
+/**
+ * Over imagery the dark landmass is dropped entirely and the focus tint is cut
+ * to a wash — just enough to keep the four provinces distinguishable from the
+ * rest of the country, without burying what the imagery is being consulted for.
+ */
+const SATELLITE_FILLS: readonly BasemapFill[] = [
+  { layer: "thailand-fill", plain: THAILAND_FILL_OPACITY, satellite: 0 },
+  { layer: "province-fill", plain: PROVINCE_FILL_OPACITY, satellite: 0.12 },
+];
+
 function baseStyle(): StyleSpecification {
   return {
     version: 8,
@@ -88,9 +158,13 @@ function baseStyle(): StyleSpecification {
       thailand: { type: "geojson", data: THAILAND },
       provinces: { type: "geojson", data: SOUTH.provinces, generateId: true },
       districts: { type: "geojson", data: SOUTH.districts },
+      [SATELLITE_SOURCE_ID]: satelliteSource(),
     },
     layers: [
       { id: "sea", type: "background", paint: { "background-color": "#04070e" } },
+      // Hidden by default; see lib/basemap.ts. Sits here so every outline,
+      // heatmap and marker below still draws on top of the imagery.
+      satelliteLayer(),
 
       // National context: present but deliberately recessive, so the eye still
       // lands on the four provinces under investigation.
@@ -98,7 +172,7 @@ function baseStyle(): StyleSpecification {
         id: "thailand-fill",
         type: "fill",
         source: "thailand",
-        paint: { "fill-color": "#0a1826", "fill-opacity": 0.85 },
+        paint: { "fill-color": "#0a1826", "fill-opacity": THAILAND_FILL_OPACITY },
       },
       {
         id: "thailand-outline",
@@ -119,7 +193,7 @@ function baseStyle(): StyleSpecification {
           "fill-color": "#12507f",
           // Brighter when zoomed out, where the area is small and needs to be
           // picked out of the country; calmer once it fills the viewport.
-          "fill-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.85, 8, 0.5, 11, 0.35],
+          "fill-opacity": PROVINCE_FILL_OPACITY,
         },
       },
       {
@@ -160,6 +234,144 @@ function baseStyle(): StyleSpecification {
       },
     ],
   };
+}
+
+/**
+ * The event layers, as plain specs.
+ *
+ * Declared at module scope so they are identical objects on every render —
+ * `<Layer>` diffs its props, and rebuilding these inline would ask MapLibre to
+ * re-evaluate every paint expression each time the parent re-renders. Only
+ * `filter` and `layout.visibility` change at runtime, and both are passed in
+ * as props at the call site.
+ */
+const HEAT_LAYER = {
+  id: "events-heat",
+  type: "heatmap",
+  maxzoom: 12,
+  paint: {
+    // Weight by severity so a critical incident counts for more than a
+    // routine one, instead of every point contributing equally.
+    "heatmap-weight": ["interpolate", ["linear"], ["get", "severity"], 1, 0.25, 5, 1],
+    "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 6, 0.7, 12, 2.4],
+    "heatmap-color": HEAT_RAMP,
+    "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 6, 14, 12, 42],
+    "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.85, 12, 0.35],
+  },
+} satisfies LayerProps;
+
+// Positional uncertainty: a district centroid must not read like a GPS fix, so
+// the halo is sized from precision_m in real metres.
+const UNCERTAINTY_LAYER = {
+  id: "events-uncertainty",
+  type: "circle",
+  minzoom: 9,
+  paint: {
+    "circle-color": ["get", "color"],
+    "circle-opacity": 0.07,
+    "circle-stroke-color": ["get", "color"],
+    "circle-stroke-opacity": 0.22,
+    "circle-stroke-width": 0.6,
+    // metres -> pixels at this latitude, per MapLibre's zoom scaling.
+    "circle-radius": [
+      "interpolate", ["exponential", 2], ["zoom"],
+      9, ["/", ["get", "precision_m"], 120],
+      14, ["/", ["get", "precision_m"], 4],
+    ],
+  },
+} satisfies LayerProps;
+
+const POINT_LAYER = {
+  id: "events-point",
+  type: "circle",
+  paint: {
+    "circle-color": ["get", "color"],
+    "circle-radius": [
+      "interpolate", ["linear"], ["zoom"],
+      6, ["interpolate", ["linear"], ["get", "severity"], 1, 2, 5, 4.5],
+      12, ["interpolate", ["linear"], ["get", "severity"], 1, 5, 5, 11],
+    ],
+    "circle-opacity": ["interpolate", ["linear"], ["get", "severity"], 1, 0.6, 5, 0.95],
+    "circle-stroke-color": "#ffffff",
+    "circle-stroke-width": ["interpolate", ["linear"], ["get", "severity"], 3, 0, 5, 0.8],
+    "circle-stroke-opacity": 0.7,
+  },
+} satisfies LayerProps;
+
+const TIME_PATH_LAYER = {
+  id: "time-path-line",
+  type: "line",
+  paint: {
+    "line-color": "#38bdf8",
+    "line-width": 1.6,
+    "line-dasharray": [2, 1.6],
+    "line-opacity": 0.85,
+  },
+} satisfies LayerProps;
+
+const CLUSTER_GLOW_LAYER = {
+  id: "clusters-glow",
+  type: "circle",
+  paint: {
+    "circle-color": ["match", ["get", "tier"], "high", "#ef4444", "#f59e0b"],
+    "circle-radius": ["match", ["get", "tier"], "high", 26, 20],
+    "circle-opacity": 0.16,
+    "circle-blur": 0.9,
+  },
+} satisfies LayerProps;
+
+const CLUSTER_RING_LAYER = {
+  id: "clusters-ring",
+  type: "circle",
+  paint: {
+    "circle-color": "transparent",
+    "circle-radius": ["match", ["get", "tier"], "high", 7, 5.5],
+    "circle-stroke-color": ["match", ["get", "tier"], "high", "#ef4444", "#f59e0b"],
+    "circle-stroke-width": 1.6,
+  },
+} satisfies LayerProps;
+
+const SUBDISTRICT_OUTLINE_LAYER = {
+  id: "subdistrict-outline",
+  type: "line",
+  minzoom: DETAIL_MIN_ZOOM,
+  paint: {
+    "line-color": "#7dd3fc",
+    "line-width": 0.4,
+    // Sits below the อำเภอ line in weight at every zoom, so the hierarchy of
+    // จังหวัด > อำเภอ > ตำบล stays readable rather than becoming a mesh.
+    "line-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11.5, 0.3],
+  },
+} satisfies LayerProps;
+
+/** หมู่บ้าน as dots — no labels, because no style here declares `glyphs`. */
+const VILLAGE_LAYER = {
+  id: "village-point",
+  type: "circle",
+  minzoom: 11,
+  paint: {
+    "circle-color": "#e2f2ff",
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 1.2, 15, 2.6],
+    "circle-opacity": ["interpolate", ["linear"], ["zoom"], 11, 0.3, 14, 0.75],
+  },
+} satisfies LayerProps;
+
+/** The two layers a click or hover is allowed to hit. */
+const INTERACTIVE_LAYERS = ["events-point", "province-fill"];
+
+/** What a hovered event dot needs to draw its popup. */
+interface HoverInfo {
+  lng: number;
+  lat: number;
+  props: Record<string, string | number>;
+}
+
+interface BoundaryInfo {
+  lng: number;
+  lat: number;
+  nameTh: string;
+  nameEn: string;
+  code: string;
 }
 
 export interface MapCluster {
@@ -204,10 +416,15 @@ export default function MapPanel({
   timePath,
   clusters,
 }: MapPanelProps) {
-  const holder = useRef<HTMLDivElement>(null);
-  const map = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<MapRef | null>(null);
   const [view, setView] = useState<View>("ไฮบริด");
+  const [satellite, setSatellite] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  // Sticky: once the analyst has been in close, the files are cached anyway.
+  const [detail, setDetail] = useState(false);
+  const [hover, setHover] = useState<HoverInfo | null>(null);
+  const [boundary, setBoundary] = useState<BoundaryInfo | null>(null);
   const timeRange = useMemo(() => {
     const timestamps = events.features.map((feature) => feature.properties.ts);
     const now = Date.now();
@@ -228,245 +445,111 @@ export default function MapPanel({
     [currentTimestamp, events],
   );
 
-  // The map-creation effect below runs exactly once (empty deps — tearing
-  // down and rebuilding a MapLibre instance on every parent re-render would be
-  // absurd), so its event handlers close over these callbacks at mount time.
-  // Refs let a fresh callback reference each render still be the one that
-  // actually runs, without needing to re-run map setup.
-  const onHoverFeatureRef = useRef(onHoverFeature);
-  const onSelectFeatureRef = useRef(onSelectFeature);
-  useEffect(() => {
-    onHoverFeatureRef.current = onHoverFeature;
-  }, [onHoverFeature]);
-  useEffect(() => {
-    onSelectFeatureRef.current = onSelectFeature;
-  }, [onSelectFeature]);
+  // Built once. `<Map mapStyle>` re-issues the style to MapLibre whenever the
+  // object identity changes, and the base style genuinely never changes — the
+  // satellite toggle edits it in place instead.
+  const mapStyle = useMemo(() => baseStyle(), []);
 
-  // Create the map once; data and paint changes are applied in later effects.
-  useEffect(() => {
-    if (!holder.current || map.current) return;
+  /**
+   * Event replay is a GPU-layer filter: advancing time re-evaluates an
+   * expression, it does not create or destroy DOM nodes, so it stays cheap as
+   * the feature count grows.
+   */
+  const timeFilter = useMemo<ExpressionSpecification>(
+    () => ["<=", ["get", "ts"], currentTimestamp],
+    [currentTimestamp],
+  );
+  const uncertaintyFilter = useMemo<ExpressionSpecification>(
+    () => ["all", [">", ["get", "precision_m"], 500], timeFilter],
+    [timeFilter],
+  );
 
-    const m = new maplibregl.Map({
-      container: holder.current,
-      style: baseStyle(),
-      // Open on the four provinces under investigation. The rest of Thailand
-      // is still drawn around them for context, and the "ดูทั้งประเทศ" button
-      // pulls back to the national view.
-      bounds: BOUNDS,
-      fitBoundsOptions: { padding: FIT_PADDING },
-      attributionControl: false,
-      dragRotate: false,
-    });
-    map.current = m;
-    // MapLibre swallows style and source failures unless you listen for them:
-    // an invalid style just leaves a blank canvas and logs nothing. Keep this.
-    m.on("error", (e) => console.error("[maplibre]", e.error?.message ?? String(e)));
-    if (process.env.NODE_ENV !== "production") {
-      (window as unknown as { __map?: unknown }).__map = m;
-    }
-
-    m.on("load", () => {
-      m.addSource("events", { type: "geojson", data: events as never });
-
-      m.addLayer({
-        id: "events-heat",
-        type: "heatmap",
-        source: "events",
-        maxzoom: 12,
-        paint: {
-          // Weight by severity so a critical incident counts for more than a
-          // routine one, instead of every point contributing equally.
-          "heatmap-weight": ["interpolate", ["linear"], ["get", "severity"], 1, 0.25, 5, 1],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 6, 0.7, 12, 2.4],
-          "heatmap-color": HEAT_RAMP,
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 6, 14, 12, 42],
-          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.85, 12, 0.35],
-        },
-      });
-
-      // Positional uncertainty: a district centroid must not read like a GPS
-      // fix, so the halo is sized from precision_m in real metres.
-      m.addLayer({
-        id: "events-uncertainty",
-        type: "circle",
-        source: "events",
-        minzoom: 9,
-        filter: [">", ["get", "precision_m"], 500],
-        paint: {
-          "circle-color": ["get", "color"],
-          "circle-opacity": 0.07,
-          "circle-stroke-color": ["get", "color"],
-          "circle-stroke-opacity": 0.22,
-          "circle-stroke-width": 0.6,
-          // metres -> pixels at this latitude, per MapLibre's zoom scaling.
-          "circle-radius": [
-            "interpolate", ["exponential", 2], ["zoom"],
-            9, ["/", ["get", "precision_m"], 120],
-            14, ["/", ["get", "precision_m"], 4],
-          ],
-        },
-      });
-
-      m.addLayer({
-        id: "events-point",
-        type: "circle",
-        source: "events",
-        paint: {
-          "circle-color": ["get", "color"],
-          "circle-radius": [
-            "interpolate", ["linear"], ["zoom"],
-            6, ["interpolate", ["linear"], ["get", "severity"], 1, 2, 5, 4.5],
-            12, ["interpolate", ["linear"], ["get", "severity"], 1, 5, 5, 11],
-          ],
-          "circle-opacity": ["interpolate", ["linear"], ["get", "severity"], 1, 0.6, 5, 0.95],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": ["interpolate", ["linear"], ["get", "severity"], 3, 0, 5, 0.8],
-          "circle-stroke-opacity": 0.7,
-        },
-      });
-
-      // Only added when a parent actually supplies these — `/investigate`'s
-      // plain usage never creates them, so its map is unchanged.
-      if (timePath !== undefined) {
-        m.addSource("time-path", { type: "geojson", data: emptyLineString() });
-        m.addLayer({
-          id: "time-path-line",
-          type: "line",
-          source: "time-path",
-          paint: {
-            "line-color": "#38bdf8",
-            "line-width": 1.6,
-            "line-dasharray": [2, 1.6],
-            "line-opacity": 0.85,
-          },
-        });
-      }
-      if (clusters !== undefined) {
-        m.addSource("clusters", { type: "geojson", data: emptyFeatureCollection() });
-        m.addLayer({
-          id: "clusters-glow",
-          type: "circle",
-          source: "clusters",
-          paint: {
-            "circle-color": ["match", ["get", "tier"], "high", "#ef4444", "#f59e0b"],
-            "circle-radius": ["match", ["get", "tier"], "high", 26, 20],
-            "circle-opacity": 0.16,
-            "circle-blur": 0.9,
-          },
-        });
-        m.addLayer({
-          id: "clusters-ring",
-          type: "circle",
-          source: "clusters",
-          paint: {
-            "circle-color": "transparent",
-            "circle-radius": ["match", ["get", "tier"], "high", 7, 5.5],
-            "circle-stroke-color": ["match", ["get", "tier"], "high", "#ef4444", "#f59e0b"],
-            "circle-stroke-width": 1.6,
-          },
-        });
-      }
-
-      setReady(true);
-    });
-
-    const popup = new maplibregl.Popup({
-      closeButton: false,
-      className: "palantir-popup",
-      offset: 10,
-    });
-
-    m.on("mouseenter", "events-point", (e: MapLayerMouseEvent) => {
-      m.getCanvas().style.cursor = "pointer";
-      const f = e.features?.[0];
-      if (!f) return;
-      const p = f.properties as Record<string, string | number>;
-      const when = new Intl.DateTimeFormat("th-TH", {
-        dateStyle: "medium",
-        timeStyle: "short",
-        calendar: "buddhist",
-      }).format(new Date(Number(p.ts)));
-
-      popup
-        .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
-        .setHTML(
-          `<div class="pp-title">${escapeHtml(String(p.title))}</div>
-           <div class="pp-meta">อ.${escapeHtml(String(p.district))} จ.${escapeHtml(String(p.province))}</div>
-           <div class="pp-meta">${when}</div>
-           <div class="pp-row"><span>ความรุนแรง</span><b>${p.severity}/5</b></div>
-           <div class="pp-row"><span>ความเชื่อมั่น</span><b>${p.confidence}%</b></div>
-           <div class="pp-row"><span>ความละเอียดพิกัด</span><b>${PRECISION_LABEL[String(p.precision)] ?? "ไม่ระบุ"}</b></div>`,
-        )
-        .addTo(m);
-      onHoverFeatureRef.current?.(String(p.id));
-    });
-    m.on("mouseleave", "events-point", () => {
-      m.getCanvas().style.cursor = "";
-      popup.remove();
-      onHoverFeatureRef.current?.(null);
-    });
-    m.on("click", "events-point", (e: MapLayerMouseEvent) => {
-      const p = e.features?.[0]?.properties as Record<string, string> | undefined;
-      onSelectFeatureRef.current?.(p ? p.id : null);
-    });
-
-    const boundaryPopup = new maplibregl.Popup({
-      closeButton: false,
-      className: "palantir-popup",
-      offset: 8,
-    });
-    m.on("click", "province-fill", (e: MapLayerMouseEvent) => {
-      const properties = e.features?.[0]?.properties as Record<string, string> | undefined;
-      if (!properties) return;
-      boundaryPopup
-        .setLngLat(e.lngLat)
-        .setHTML(
-          `<div class="pp-title">${escapeHtml(properties.province_th)}</div>
-           <div class="pp-meta">${escapeHtml(properties.province_en)}</div>
-           <div class="pp-row"><span>รหัสจังหวัด</span><b>${escapeHtml(properties.province_code)}</b></div>`,
-        )
-        .addTo(m);
-    });
-
-    return () => {
-      m.remove();
-      map.current = null;
-    };
-    // Event data is pushed by the effect below; this effect must run once only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Push new data when the filters change, without rebuilding the map.
-  useEffect(() => {
-    const src = map.current?.getSource("events") as maplibregl.GeoJSONSource | undefined;
-    src?.setData(events as never);
-  }, [events, ready]);
-
-  // Same update pattern as the `events` source above, for the two optional
-  // layers — only touches sources that were actually created (i.e. only when
-  // the parent passed these props in the first place).
-  useEffect(() => {
-    if (!ready || timePath === undefined) return;
-    const src = map.current?.getSource("time-path") as maplibregl.GeoJSONSource | undefined;
-    src?.setData({
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: timePath },
+  const timePathData = useMemo(
+    () => ({
+      type: "Feature" as const,
+      geometry: { type: "LineString" as const, coordinates: timePath ?? [] },
       properties: {},
-    } as never);
-  }, [timePath, ready]);
+    }),
+    [timePath],
+  );
 
-  useEffect(() => {
-    if (!ready || clusters === undefined) return;
-    const src = map.current?.getSource("clusters") as maplibregl.GeoJSONSource | undefined;
-    src?.setData({
-      type: "FeatureCollection",
-      features: clusters.map((c) => ({
+  const clusterData = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: (clusters ?? []).map((c) => ({
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: [c.lng, c.lat] },
         properties: { tier: c.tier, label: c.label },
       })),
-    } as never);
-  }, [clusters, ready]);
+    }),
+    [clusters],
+  );
+
+  // Imagery lives in the base style, so it is toggled through the instance
+  // rather than through this tree. `ready` gates it: the layers do not exist
+  // until the style has loaded.
+  useEffect(() => {
+    const m = mapRef.current?.getMap();
+    if (!m || !ready) return;
+    setSatelliteBasemap(m, satellite, SATELLITE_FILLS);
+  }, [satellite, ready]);
+
+  /**
+   * One handler for both interactive layers, because a click can legitimately
+   * land on both: the dot the analyst meant, and the province polygon under
+   * it. Each is answered on its own terms rather than one swallowing the other.
+   */
+  const handleClick = useCallback(
+    (e: MapLayerMouseEvent) => {
+      const point = e.features?.find((f) => f.layer.id === "events-point");
+      const province = e.features?.find((f) => f.layer.id === "province-fill");
+
+      onSelectFeature?.(point ? String(point.properties.id) : null);
+
+      if (province) {
+        const props = province.properties as Record<string, string>;
+        setBoundary({
+          lng: e.lngLat.lng,
+          lat: e.lngLat.lat,
+          nameTh: props.province_th,
+          nameEn: props.province_en,
+          code: props.province_code,
+        });
+      }
+    },
+    [onSelectFeature],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: MapLayerMouseEvent) => {
+      const f = e.features?.find((feature) => feature.layer.id === "events-point");
+      if (!f) {
+        // Only report the change once, on the way out — `mousemove` fires on
+        // every pixel and would otherwise call the parent back continuously.
+        setHover((prev) => {
+          if (prev) onHoverFeature?.(null);
+          return prev ? null : prev;
+        });
+        return;
+      }
+      const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+      const props = f.properties as Record<string, string | number>;
+      setHover((prev) => {
+        if (prev?.props.id === props.id) return prev;
+        onHoverFeature?.(String(props.id));
+        return { lng, lat, props };
+      });
+    },
+    [onHoverFeature],
+  );
+
+  const handleMouseLeave = useCallback(() => {
+    setHover(null);
+    onHoverFeature?.(null);
+  }, [onHoverFeature]);
+
+  const nudgeZoom = (d: number) =>
+    mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 7) + d });
 
   // Controlled mode: the parent (e.g. EventsWorkspace) owns the initial
   // timestamp and any reset-on-refilter behaviour; MapPanel must not
@@ -477,21 +560,6 @@ export default function MapPanel({
     setPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeRange.end, timeRange.start, isControlled]);
-
-  // Event replay is a GPU-layer filter; advancing time does not create or
-  // destroy DOM/SVG nodes and remains cheap as the feature count grows.
-  useEffect(() => {
-    const m = map.current;
-    if (!m || !ready) return;
-    const timeFilter: FilterSpecification = ["<=", ["get", "ts"], currentTimestamp];
-    m.setFilter("events-heat", timeFilter);
-    m.setFilter("events-point", timeFilter);
-    m.setFilter("events-uncertainty", [
-      "all",
-      [">", ["get", "precision_m"], 500],
-      timeFilter,
-    ]);
-  }, [currentTimestamp, ready]);
 
   // Tracks the latest timestamp outside React state so the interval below can
   // read "where are we right now" without depending on `currentTimestamp` (which
@@ -520,19 +588,6 @@ export default function MapPanel({
     return () => window.clearInterval(timer);
   }, [playing, timeRange.end, timeRange.start]);
 
-  // View switcher toggles layer visibility rather than restyling.
-  useEffect(() => {
-    const m = map.current;
-    if (!m || !ready) return;
-    const vis = (id: string, on: boolean) =>
-      m.getLayer(id) && m.setLayoutProperty(id, "visibility", on ? "visible" : "none");
-
-    vis("events-heat", view !== "แผนที่");
-    vis("events-point", view !== "ความหนาแน่น");
-    vis("events-uncertainty", view === "ไฮบริด");
-  }, [view, ready]);
-
-  const nudgeZoom = (d: number) => map.current?.easeTo({ zoom: (map.current.getZoom() ?? 7) + d });
   const replayDate = new Intl.DateTimeFormat("th-TH", {
     day: "numeric",
     month: "short",
@@ -542,12 +597,132 @@ export default function MapPanel({
 
   return (
     <section className="panel relative h-full min-h-0 overflow-hidden">
-      {/* Size this with h-full/w-full, not `absolute inset-0`: maplibre-gl.css
-          sets `.maplibregl-map { position: relative }` on its container, which
-          overrides the absolute positioning. The inset offsets then stop
-          stretching the box and it collapses to height 0 — the canvas renders
-          but is clipped away, with no error anywhere. */}
-      <div ref={holder} className="h-full w-full" />
+      {/* Size this with width/height 100%, not `absolute inset-0`:
+          maplibre-gl.css sets `.maplibregl-map { position: relative }` on the
+          container react-map-gl creates, which overrides absolute positioning.
+          The inset offsets then stop stretching the box and it collapses to
+          height 0 — the canvas renders but is clipped away, with no error
+          anywhere. */}
+      <Map
+        ref={mapRef}
+        // Open on the four provinces under investigation. The rest of Thailand
+        // is still drawn around them for context, and the "ดูทั้งประเทศ" button
+        // pulls back to the national view.
+        initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: FIT_PADDING } }}
+        mapStyle={mapStyle}
+        style={{ width: "100%", height: "100%" }}
+        attributionControl={false}
+        dragRotate={false}
+        interactiveLayerIds={INTERACTIVE_LAYERS}
+        cursor={hover ? "pointer" : undefined}
+        onLoad={(e) => {
+          setReady(true);
+          setDetail(e.target.getZoom() >= DETAIL_MIN_ZOOM);
+        }}
+        onZoomEnd={(e) => setDetail((on) => on || e.viewState.zoom >= DETAIL_MIN_ZOOM)}
+        onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        // MapLibre swallows style and source failures unless you listen for
+        // them: an invalid style just leaves a blank canvas and logs nothing.
+        onError={(e) => console.error("[maplibre]", e.error?.message ?? String(e))}
+      >
+        {/* Credits the imagery provider only while its tiles are on screen —
+            MapLibre lists a source when a visible layer uses it, and nothing
+            else in this style carries an attribution. */}
+        <AttributionControl compact position="bottom-right" />
+
+        {detail && (
+          <>
+            <Source id="subdistricts" type="geojson" data={SOUTH.subdistricts}>
+              <Layer {...SUBDISTRICT_OUTLINE_LAYER} beforeId="district-outline" />
+            </Source>
+            <Source id="villages" type="geojson" data={SOUTH.villages}>
+              <Layer {...VILLAGE_LAYER} beforeId="district-outline" />
+            </Source>
+          </>
+        )}
+
+        <Source id="events" type="geojson" data={events}>
+          <Layer
+            {...HEAT_LAYER}
+            filter={timeFilter}
+            layout={{ visibility: view !== "แผนที่" ? "visible" : "none" }}
+          />
+          <Layer
+            {...UNCERTAINTY_LAYER}
+            filter={uncertaintyFilter}
+            layout={{ visibility: view === "ไฮบริด" ? "visible" : "none" }}
+          />
+          <Layer
+            {...POINT_LAYER}
+            filter={timeFilter}
+            layout={{ visibility: view !== "ความหนาแน่น" ? "visible" : "none" }}
+          />
+        </Source>
+
+        {/* Rendered only when a parent actually supplies these —
+            `/investigate`'s plain usage never creates them, so its map is
+            unchanged. */}
+        {timePath !== undefined && (
+          <Source id="time-path" type="geojson" data={timePathData}>
+            <Layer {...TIME_PATH_LAYER} />
+          </Source>
+        )}
+        {clusters !== undefined && (
+          <Source id="clusters" type="geojson" data={clusterData}>
+            <Layer {...CLUSTER_GLOW_LAYER} />
+            <Layer {...CLUSTER_RING_LAYER} />
+          </Source>
+        )}
+
+        {hover && (
+          <Popup
+            longitude={hover.lng}
+            latitude={hover.lat}
+            closeButton={false}
+            closeOnClick={false}
+            className="palantir-popup"
+            offset={10}
+          >
+            <div className="pp-title">{String(hover.props.title)}</div>
+            <div className="pp-meta">
+              อ.{String(hover.props.district)} จ.{String(hover.props.province)}
+            </div>
+            <div className="pp-meta">{hoverWhen(hover)}</div>
+            <div className="pp-row">
+              <span>ความรุนแรง</span>
+              <b>{hover.props.severity}/5</b>
+            </div>
+            <div className="pp-row">
+              <span>ความเชื่อมั่น</span>
+              <b>{hover.props.confidence}%</b>
+            </div>
+            <div className="pp-row">
+              <span>ความละเอียดพิกัด</span>
+              <b>{PRECISION_LABEL[String(hover.props.precision)] ?? "ไม่ระบุ"}</b>
+            </div>
+          </Popup>
+        )}
+
+        {boundary && (
+          <Popup
+            longitude={boundary.lng}
+            latitude={boundary.lat}
+            closeButton={false}
+            className="palantir-popup"
+            offset={8}
+            onClose={() => setBoundary(null)}
+          >
+            <div className="pp-title">{boundary.nameTh}</div>
+            <div className="pp-meta">{boundary.nameEn}</div>
+            <div className="pp-row">
+              <span>รหัสจังหวัด</span>
+              <b>{boundary.code}</b>
+            </div>
+          </Popup>
+        )}
+      </Map>
 
       <div className="pointer-events-none absolute inset-0">
         {/* View switcher */}
@@ -568,14 +743,44 @@ export default function MapPanel({
           ))}
         </div>
 
-        <button
-          type="button"
-          className="pointer-events-auto absolute top-11 left-3 flex items-center gap-1.5 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] px-2.5 py-1.5 text-[11.5px] text-ink-dim hover:text-ink"
-        >
-          <IconStack2 size={14} stroke={1.7} />
-          ชั้นข้อมูล
-          <IconChevronDown size={13} stroke={2} />
-        </button>
+        <div className="pointer-events-auto absolute top-11 left-3">
+          <button
+            type="button"
+            onClick={() => setLayersOpen((v) => !v)}
+            aria-expanded={layersOpen}
+            className="flex items-center gap-1.5 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] px-2.5 py-1.5 text-[11.5px] text-ink-dim hover:text-ink"
+          >
+            <IconStack2 size={14} stroke={1.7} />
+            ชั้นข้อมูล
+            <IconChevronDown
+              size={13}
+              stroke={2}
+              className={layersOpen ? "rotate-180 transition-transform" : "transition-transform"}
+            />
+          </button>
+
+          {layersOpen && (
+            <div className="mt-1 w-[186px] rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.92)] p-2.5">
+              <label className="flex cursor-pointer items-start gap-2 text-[11.5px] text-ink-dim hover:text-ink">
+                <input
+                  type="checkbox"
+                  checked={satellite}
+                  onChange={() => setSatellite((v) => !v)}
+                  className="mt-[2px] h-3.5 w-3.5 shrink-0 appearance-none rounded-[3px] border border-[rgba(90,140,190,0.7)] bg-transparent checked:border-azure checked:bg-azure checked:after:block checked:after:text-[10px] checked:after:leading-[13px] checked:after:font-bold checked:after:text-[#04070e] checked:after:content-['✓']"
+                />
+                <span>
+                  <span className="flex items-center gap-1.5 text-ink">
+                    <IconSatellite size={13} stroke={1.7} />
+                    ภาพถ่ายดาวเทียม
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
+                    ดึงไทล์จากผู้ให้บริการภายนอก — เปิดเมื่อต้องการเท่านั้น
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+        </div>
 
         {/* Zoom + recentre */}
         <div className="pointer-events-auto absolute top-24 left-3 flex flex-col gap-1.5">
@@ -601,7 +806,7 @@ export default function MapPanel({
             type="button"
             aria-label="โฟกัส 4 จังหวัดชายแดนใต้"
             title="โฟกัส 4 จังหวัดชายแดนใต้"
-            onClick={() => map.current?.fitBounds(BOUNDS, { padding: FIT_PADDING })}
+            onClick={() => mapRef.current?.fitBounds(BOUNDS, { padding: FIT_PADDING })}
             className="rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] px-1.5 py-1 text-ink-dim hover:text-ink"
           >
             <IconCurrentLocation size={14} stroke={1.8} />
@@ -610,7 +815,7 @@ export default function MapPanel({
             type="button"
             aria-label="ดูทั้งประเทศ"
             title="ดูทั้งประเทศ"
-            onClick={() => map.current?.fitBounds(THAILAND_BOUNDS, { padding: FIT_PADDING })}
+            onClick={() => mapRef.current?.fitBounds(THAILAND_BOUNDS, { padding: FIT_PADDING })}
             className="rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] px-1.5 py-1 text-ink-dim hover:text-ink"
           >
             <IconMap2 size={14} stroke={1.8} />
@@ -618,16 +823,23 @@ export default function MapPanel({
         </div>
 
         {/* Legend */}
-        <div className="absolute top-2.5 right-2.5 w-[152px] rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5">
+        <div className="absolute top-2.5 right-2.5 flex max-h-[calc(100%-1.25rem)] w-[152px] flex-col overflow-y-auto rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5">
           <p className="mb-1.5 text-[11.5px] font-semibold text-ink">สัญลักษณ์</p>
           <ul className="space-y-1">
-            {LEGEND.map((l) => (
-              <li key={l.type} className="flex items-center gap-2 text-[10.5px] text-ink-dim">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: l.color, boxShadow: `0 0 5px ${l.color}` }}
-                />
-                {l.label}
+            {LEGEND.map((g) => (
+              <li key={g.family}>
+                <p className="text-[9.5px] tracking-wide text-ink-muted uppercase">{g.label}</p>
+                <ul className="mt-0.5 space-y-1">
+                  {g.types.map((l) => (
+                    <li key={l.type} className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: l.color, boxShadow: `0 0 5px ${l.color}` }}
+                      />
+                      {l.label}
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
             <li className="flex items-center gap-2 pt-1 text-[10.5px] text-ink-dim">
@@ -645,6 +857,14 @@ export default function MapPanel({
             <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
               <span className="h-px w-3 shrink-0 bg-azure/50" />
               ขอบเขตอำเภอ
+            </li>
+            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+              <span className="h-px w-3 shrink-0 bg-[#7dd3fc]/40" />
+              ขอบเขตตำบล
+            </li>
+            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+              <span className="h-1 w-1 shrink-0 rounded-full bg-[#e2f2ff]" />
+              หมู่บ้าน (OSM)
             </li>
             <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
               <span className="h-2 w-2 shrink-0 rounded-full border border-ink-muted" />
@@ -711,18 +931,11 @@ const PRECISION_LABEL: Record<string, string> = {
   unknown: "ไม่ระบุ",
 };
 
-/** Placeholder GeoJSON so a source can be created before real data exists. */
-function emptyLineString(): GeoJSON.Feature<GeoJSON.LineString> {
-  return { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
-}
-
-function emptyFeatureCollection(): GeoJSON.FeatureCollection {
-  return { type: "FeatureCollection", features: [] };
-}
-
-/** Popup HTML is built by hand, so escape anything sourced from the data. */
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string,
-  );
+/** Popup timestamp, in the Buddhist-era calendar the rest of the UI uses. */
+function hoverWhen(hover: HoverInfo): string {
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    calendar: "buddhist",
+  }).format(new Date(Number(hover.props.ts)));
 }

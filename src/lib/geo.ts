@@ -25,3 +25,6 @@ export const PROVINCES: ProvinceMeta[] = [
 ];
 
 export const PROVINCE_BY_CODE = new Map(PROVINCES.map((p) => [p.code, p]));
+
+/** Reverse of `PROVINCE_BY_CODE` — DDPM numeric code back to this app's own. */
+export const PROVINCE_BY_DDPM = new Map(PROVINCES.map((p) => [p.ddpmCode, p]));
