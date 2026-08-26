@@ -22,6 +22,7 @@ export default async function InvestigatePage({
 }) {
   const filters = parseFilters(await searchParams);
   const data = await getInvestigationDashboard(filters);
+  const isLocalDev = process.env.NODE_ENV === "development" && !process.env.VERCEL;
 
   return (
     <div className="flex h-screen min-w-[1180px] flex-col overflow-hidden">
@@ -33,9 +34,19 @@ export default async function InvestigatePage({
         <main className="min-w-0 flex-1 overflow-auto bg-abyss p-2">
           {!data.live && (
             <p className="fixed top-[46px] right-3 z-50 rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
-              กำลังแสดงชุดข้อมูลตัวอย่าง — ยังเชื่อมต่อ MongoDB ไม่ได้ ให้รัน{" "}
-              <code className="font-mono">docker compose up -d</code> แล้ว{" "}
-              <code className="font-mono">npm run db:seed</code>
+              {/* The docker hint is a local-development instruction. On a
+                  hosted deployment there is no container to start, so showing
+                  it there sends the reader to fix the wrong thing; the real
+                  cause is in the server log written by loadBundle(). */}
+              {isLocalDev ? (
+                <>
+                  ยังเชื่อมต่อ MongoDB ไม่ได้ ให้รัน{" "}
+                  <code className="font-mono">docker compose up -d</code> แล้ว{" "}
+                  <code className="font-mono">npm run db:seed</code>
+                </>
+              ) : (
+                <>ยังเชื่อมต่อฐานข้อมูลไม่ได้ — ไม่มีข้อมูลแสดงในขณะนี้</>
+              )}
             </p>
           )}
 
