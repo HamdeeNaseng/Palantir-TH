@@ -13,6 +13,7 @@ import {
 } from "@/lib/geography";
 import { EVENT_TYPE_LABEL } from "@/lib/labels";
 import { pinGeoPrecision, REPORT_PIN, type ReportFormState } from "@/lib/report-form";
+import { RECAPTCHA_FIELD } from "@/lib/recaptcha";
 import {
   isHoneypotFilled,
   readReportForm,
@@ -21,6 +22,7 @@ import {
   type FieldErrors,
   type ReportInput,
 } from "@/lib/report-schema";
+import { verifyRecaptcha } from "@/server/recaptcha-verify";
 import type {
   CitizenReportDoc,
   EventCandidateDoc,
@@ -173,6 +175,19 @@ export async function submitCitizenReport(
   // learn it exists.
   if (isHoneypotFilled(formData)) {
     return { status: "success", message: "ขอบคุณสำหรับการแจ้งเหตุ" };
+  }
+
+  // Second gate, after the honeypot and before anything is parsed or written.
+  // Unlike the honeypot this one tells the sender it failed: a citizen whose
+  // browser blocked the widget needs to know why the form will not take their
+  // report, and a bot learns nothing from the message that its score did not
+  // already tell it.
+  const captcha = await verifyRecaptcha(String(formData.get(RECAPTCHA_FIELD) ?? ""));
+  if (!captcha.ok) {
+    return {
+      status: "error",
+      message: "ไม่สามารถยืนยันได้ว่าคุณไม่ใช่บอต กรุณาลองใหม่อีกครั้ง",
+    };
   }
 
   const parsed = reportSchema.safeParse(readReportForm(formData));
@@ -354,6 +369,10 @@ export async function submitCitizenReport(
       district: district.nameTh,
       topic: EVENT_TYPE_LABEL[r.eventType],
       became_fact: false,
+      // Kept so the 0.5 threshold can be tuned against real traffic rather
+      // than guessed at. Undefined whenever the captcha is off or Google was
+      // unreachable, which is the honest record of "not measured".
+      captcha_score: captcha.score,
     };
     await db.collection<CitizenReportDoc>(COLLECTIONS.citizenReports).insertOne(citizenReport);
 

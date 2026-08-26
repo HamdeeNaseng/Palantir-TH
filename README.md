@@ -211,6 +211,13 @@ raw_records (เก็บสิ่งที่กรอกทั้งหมด,
   double-click) จะชนกับ record เดิมและได้ case เดิมกลับมา แทนที่จะสร้างซ้ำ
 - **honeypot field** (`organization`, ซ่อนจากคนจริงด้วย CSS ไม่ใช่แค่ `hidden`) — ถ้าถูกกรอก
   จะตอบว่าสำเร็จแต่ไม่บันทึกอะไรเลย
+- **reCAPTCHA v3** (ตัวเลือกเสริม) — ตั้ง `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` กับ
+  `RECAPTCHA_SECRET_KEY` แล้วฟอร์มจะขอ token ตอนกดส่งและให้ `server/recaptcha-verify.ts`
+  ตรวจกับ Google ก่อนบันทึก ถ้า **ไม่ได้ตั้งคีย์** ระบบจะข้ามการตรวจทั้งหมด (clone ใหม่ CI
+  และ Playwright ยังทำงานเหมือนเดิม และไม่มีโค้ด captcha ส่งไปฝั่ง client เลย) ถ้า **ตั้งคีย์แล้ว**
+  token ที่ขาด/ไม่ถูกต้อง/คะแนนต่ำกว่า `RECAPTCHA_MIN_SCORE` (ค่าเริ่มต้น 0.5) จะถูกปฏิเสธ
+  แต่ถ้า **ติดต่อ Google ไม่ได้** จะปล่อยผ่านพร้อม warning — เหตุขัดข้องฝั่ง Google
+  ต้องไม่ทำให้ประชาชนแจ้งเหตุไม่ได้ คะแนนที่ได้เก็บไว้ที่ `citizen_reports.captcha_score`
 - ลิงก์หลักฐานต้องเป็น `http://`/`https://` เท่านั้น (validate ด้วย `new URL()`) กัน
   `javascript:` URL ที่จะรันได้ตอนกดลิงก์บนหน้ารายเคส
 - แหล่งข้อมูล `src_citizen` (`trust.score: 35`, ต่ำกว่าเกณฑ์ trusted ที่ 70) ถูกลงทะเบียนเอง

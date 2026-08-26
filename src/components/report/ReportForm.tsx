@@ -22,10 +22,13 @@ import {
   REPORT_LIMITS,
   REPORT_MIN_DATE,
   type DistrictOption,
+  type ReportFormState,
 } from "@/lib/report-form";
+import { RECAPTCHA_ENABLED, RECAPTCHA_FIELD } from "@/lib/recaptcha";
 import type { ProvinceCode } from "@/lib/types";
 import { submitCitizenReport } from "@/server/report-intake";
 import ReportLocationPicker, { type PickedPin } from "./ReportLocationPicker";
+import { useRecaptcha } from "./useRecaptcha";
 
 /**
  * The citizen intake form.
@@ -42,7 +45,21 @@ export default function ReportForm({
   /** Fired when "ส่งรายงานอีกฉบับ" is clicked — a fresh form is wanted. */
   onSubmitted?: () => void;
 }) {
-  const [state, formAction, pending] = useActionState(submitCitizenReport, REPORT_FORM_IDLE);
+  const executeRecaptcha = useRecaptcha();
+
+  // A v3 token is good for about two minutes, so it is minted here — at the
+  // moment of submit — rather than on render, where it would have gone stale
+  // while the reporter was placing their pin. Wrapping the action rather than
+  // rendering a hidden input is what makes that possible: `pending` then covers
+  // the token round-trip too, so the button stays disabled for all of it.
+  const [state, formAction, pending] = useActionState(
+    async (prev: ReportFormState, formData: FormData) => {
+      const token = await executeRecaptcha();
+      if (token) formData.set(RECAPTCHA_FIELD, token);
+      return submitCitizenReport(prev, formData);
+    },
+    REPORT_FORM_IDLE,
+  );
   const [provinceCode, setProvinceCode] = useState<ProvinceCode | "">("");
   const [districtCode, setDistrictCode] = useState("");
   // A pin, once placed, is the location — the selects below step aside rather
@@ -335,10 +352,38 @@ export default function ReportForm({
       </div>
 
       <div className="sm:col-span-2 flex items-center justify-between border-t border-[rgba(37,66,102,0.45)] pt-3">
-        <p className="max-w-[380px] text-[10.5px] leading-relaxed text-ink-muted">
-          รายงานนี้จะถูกบันทึกในสถานะ &ldquo;อยู่ระหว่างตรวจสอบ&rdquo; และแสดงในตารางด้านล่างทันที
-          ไม่มีการเก็บชื่อ เบอร์โทร หรืออีเมลของผู้แจ้ง
-        </p>
+        <div className="max-w-[380px] text-[10.5px] leading-relaxed text-ink-muted">
+          <p>
+            รายงานนี้จะถูกบันทึกในสถานะ &ldquo;อยู่ระหว่างตรวจสอบ&rdquo; และแสดงในตารางด้านล่างทันที
+            ไม่มีการเก็บชื่อ เบอร์โทร หรืออีเมลของผู้แจ้ง
+          </p>
+          {/* The floating reCAPTCHA badge is hidden in globals.css because it
+              would sit on top of the map picker. Google permits that only if
+              this notice is shown instead, so the two must stay together. */}
+          {RECAPTCHA_ENABLED && (
+            <p className="mt-1.5">
+              หน้านี้ได้รับการป้องกันโดย reCAPTCHA และอยู่ภายใต้{" "}
+              <a
+                href="https://policies.google.com/privacy"
+                target="_blank"
+                rel="noreferrer"
+                className="text-ink-dim underline underline-offset-2 hover:text-ink"
+              >
+                นโยบายความเป็นส่วนตัว
+              </a>{" "}
+              และ{" "}
+              <a
+                href="https://policies.google.com/terms"
+                target="_blank"
+                rel="noreferrer"
+                className="text-ink-dim underline underline-offset-2 hover:text-ink"
+              >
+                ข้อกำหนดในการให้บริการ
+              </a>
+              ของ Google
+            </p>
+          )}
+        </div>
         <button
           type="submit"
           disabled={pending}

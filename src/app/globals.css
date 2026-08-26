@@ -145,3 +145,14 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/*
+ * The reCAPTCHA v3 badge floats bottom-right, which is exactly where the map
+ * picker's controls and the pin readout sit. Google allows hiding it only when
+ * the page shows the equivalent notice instead — that notice lives beside the
+ * submit button in `ReportForm.tsx`, and neither may be removed without the
+ * other.
+ */
+.grecaptcha-badge {
+  visibility: hidden;
+}
