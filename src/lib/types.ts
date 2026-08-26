@@ -12,17 +12,101 @@
 
 export type ProvinceCode = "pattani" | "yala" | "narathiwat" | "songkhla" | "other";
 
-export type EventType =
-  | "explosion" // ลอบวางระเบิด
-  | "shooting" // ยิง/ประทะ
-  | "arson" // วางเพลิง
-  | "abduction" // ลักพาตัว
-  | "raid" // ตรวจค้น/จับกุม
-  | "unrest" // เหตุรุนแรง
-  | "narcotics" // ยาเสพติด
-  | "crime" // อาชญากรรม
-  | "gang" // กิจกรรมกลุ่ม
+/**
+ * Every event category the system knows, in display order.
+ *
+ * This array — not a hand-written union — is the vocabulary. Filters, chips,
+ * legends and the citizen intake form all derive from it, because the same
+ * ten strings used to be re-typed in eight places and adding a category meant
+ * finding all eight. `EventType` falls out of the array, so the type checker
+ * now points at every `Record<EventType, …>` that has not caught up.
+ *
+ * The scope is สาธารณภัย as DDPM defines it, not conflict alone: the four
+ * provinces flood every monsoon, and a flood that closes a road is exactly the
+ * kind of thing a citizen opens this app to report.
+ */
+export const EVENT_TYPES = [
+  // ความไม่สงบ
+  "explosion", // ลอบวางระเบิด
+  "shooting", // ยิง/ปะทะ
+  "arson", // วางเพลิง
+  "unrest", // เหตุไม่สงบ
+  // กลุ่มเคลื่อนไหว
+  "abduction", // ลักพาตัว
+  "gang", // กิจกรรมกลุ่ม
+  // บังคับใช้กฎหมาย / อาชญากรรม
+  "raid", // ตรวจค้น/จับกุม
+  "narcotics", // ยาเสพติด
+  "crime", // อาชญากรรม
+  // ภัยพิบัติธรรมชาติ
+  "flood", // อุทกภัย
+  "storm", // วาตภัย
+  "landslide", // ดินโคลนถล่ม
+  "wildfire", // ไฟป่า/หมอกควัน
+  "drought", // ภัยแล้ง
+  // อุบัติภัย
+  "fire", // อัคคีภัย — ไฟไหม้ที่ยังไม่มีใครอ้างว่าจงใจ ต่างจาก arson
+  "accident", // อุบัติเหตุ
+  "other",
+] as const;
+
+export type EventType = (typeof EVENT_TYPES)[number];
+
+/**
+ * The coarse grouping every chart, legend and trend series rolls up to.
+ *
+ * Seventeen categories is more than any legend or colour scale can carry on
+ * its own, so the family is what the eye is meant to read first and the type
+ * is the detail underneath it. Splitting `disaster` from `safety` is not
+ * decoration: a flood is a hazard nobody caused, a house fire is one somebody
+ * might have, and merging them would put those two questions on one line.
+ */
+export type EventFamily =
+  | "violence"
+  | "gang"
+  | "narcotics"
+  | "crime"
+  | "disaster"
+  | "safety"
   | "other";
+
+/** Display order for families. */
+export const EVENT_FAMILIES: readonly EventFamily[] = [
+  "violence",
+  "gang",
+  "narcotics",
+  "crime",
+  "disaster",
+  "safety",
+  "other",
+];
+
+export const EVENT_FAMILY: Record<EventType, EventFamily> = {
+  explosion: "violence",
+  shooting: "violence",
+  arson: "violence",
+  unrest: "violence",
+  abduction: "gang",
+  gang: "gang",
+  narcotics: "narcotics",
+  crime: "crime",
+  flood: "disaster",
+  storm: "disaster",
+  landslide: "disaster",
+  wildfire: "disaster",
+  drought: "disaster",
+  fire: "safety",
+  accident: "safety",
+  // `raid` is an enforcement action rather than an incident, and has always
+  // been counted outside the violence trend it responds to. Left where it was.
+  raid: "other",
+  other: "other",
+};
+
+/** The types in one family, in the display order of `EVENT_TYPES`. */
+export function typesInFamily(family: EventFamily): EventType[] {
+  return EVENT_TYPES.filter((t) => EVENT_FAMILY[t] === family);
+}
 
 /** Where a record sits on the RAW -> CLAIM -> VERIFIED FACT ladder. */
 export type VerificationStatus =

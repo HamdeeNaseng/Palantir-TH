@@ -1,3 +1,4 @@
+import { EVENT_TYPES } from "./types";
 import type { EventType, ProvinceCode, VerificationStatus } from "./types";
 
 /**
@@ -66,10 +67,6 @@ export const CASE_SORT_KEYS: readonly CaseSortKey[] = [
 ];
 
 const PROVINCE_CODES = ["pattani", "yala", "narathiwat", "songkhla", "other"] as const;
-const EVENT_TYPES = [
-  "explosion", "shooting", "arson", "abduction", "raid",
-  "unrest", "narcotics", "crime", "gang", "other",
-] as const;
 const VERIFICATIONS = ["verified", "under_review", "unverifiable"] as const;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

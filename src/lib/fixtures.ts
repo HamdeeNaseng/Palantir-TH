@@ -122,15 +122,32 @@ export const SOURCES: SourceRegistryDoc[] = [
   },
 ];
 
-const EVENT_TYPES: { type: EventType; label: string; weight: number }[] = [
-  { type: "unrest", label: "เหตุรุนแรง", weight: 22 },
-  { type: "shooting", label: "ยิง/ประทะ", weight: 20 },
-  { type: "raid", label: "ตรวจค้น/จับกุม", weight: 18 },
-  { type: "explosion", label: "ลอบวางระเบิด", weight: 14 },
-  { type: "arson", label: "วางเพลิง", weight: 9 },
-  { type: "narcotics", label: "ยาเสพติด", weight: 8 },
-  { type: "abduction", label: "ลักพาตัว", weight: 5 },
-  { type: "crime", label: "อาชญากรรม", weight: 4 },
+/**
+ * Relative frequency of each category in generated demo data.
+ *
+ * The conflict categories keep the weights they always had, so a reseed still
+ * produces the same shape of dataset. The สาธารณภัย categories are weighted
+ * from what these four provinces actually live with — the northeast monsoon
+ * floods them most years, while ภัยแล้ง and ดินถล่ม are real but rare — rather
+ * than given a flat share, which would make the demo look like the south has
+ * as many landslides as shootings.
+ */
+const TYPE_MIX: { type: EventType; weight: number }[] = [
+  { type: "unrest", weight: 22 },
+  { type: "shooting", weight: 20 },
+  { type: "raid", weight: 18 },
+  { type: "explosion", weight: 14 },
+  { type: "arson", weight: 9 },
+  { type: "narcotics", weight: 8 },
+  { type: "abduction", weight: 5 },
+  { type: "crime", weight: 4 },
+  { type: "flood", weight: 7 },
+  { type: "accident", weight: 6 },
+  { type: "fire", weight: 4 },
+  { type: "storm", weight: 3 },
+  { type: "landslide", weight: 2 },
+  { type: "wildfire", weight: 2 },
+  { type: "drought", weight: 1 },
 ];
 
 // Display labels live in ./labels — this module is server-only (it reads
@@ -146,13 +163,20 @@ const TITLE_BY_TYPE: Record<EventType, string[]> = {
   narcotics: ["จับกุมเครือข่ายยาเสพติด", "ตรวจยึดยาเสพติดของกลาง"],
   crime: ["เหตุอาชญากรรมทั่วไป", "ชิงทรัพย์ในพื้นที่เฝ้าระวัง"],
   gang: ["ความเคลื่อนไหวของกลุ่มเป้าหมาย"],
+  flood: ["น้ำท่วมฉับพลันในพื้นที่ลุ่ม", "น้ำล้นตลิ่งเข้าท่วมบ้านเรือน", "น้ำท่วมขังเส้นทางสัญจร"],
+  storm: ["วาตภัยพัดบ้านเรือนเสียหาย", "พายุฝนฟ้าคะนองต้นไม้ล้มทับ"],
+  landslide: ["ดินสไลด์ปิดเส้นทาง", "ดินโคลนถล่มเชิงเขา"],
+  wildfire: ["ไฟไหม้ป่าพรุ", "หมอกควันจากไฟป่าปกคลุมพื้นที่"],
+  drought: ["ภัยแล้งกระทบพื้นที่เกษตร", "ขาดแคลนน้ำอุปโภคบริโภค"],
+  fire: ["เพลิงไหม้บ้านเรือนราษฎร", "เพลิงไหม้อาคารพาณิชย์"],
+  accident: ["อุบัติเหตุทางถนน", "เรือประมงประสบเหตุกลางทะเล"],
   other: ["เหตุการณ์อื่น ๆ"],
 };
 
 function weightedType(r: () => number): EventType {
-  const total = EVENT_TYPES.reduce((s, t) => s + t.weight, 0);
+  const total = TYPE_MIX.reduce((s, t) => s + t.weight, 0);
   let n = r() * total;
-  for (const t of EVENT_TYPES) {
+  for (const t of TYPE_MIX) {
     n -= t.weight;
     if (n <= 0) return t.type;
   }
