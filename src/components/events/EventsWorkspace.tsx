@@ -15,7 +15,9 @@ import {
   phenomenaSummary,
   playedSoFar,
   scopedTimePath,
+  scopedWindow,
 } from "@/lib/events-replay";
+import { useFlowLegs } from "@/lib/flow/use-flow-legs";
 import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
 
 /**
@@ -44,6 +46,7 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
   const [autoPlay, setAutoPlay] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [flowCorridorsEnabled, setFlowCorridorsEnabled] = useState(false);
 
   // A fresh filter selection ships a brand-new `data` (different span, event
   // set) — resync the playback window rather than carrying over a timestamp
@@ -76,6 +79,12 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
 
   const playedFeatures = useMemo(() => playedSoFar(features, currentTimestamp), [features, currentTimestamp]);
   const pathCoords = useMemo(() => scopedTimePath(features, currentTimestamp), [features, currentTimestamp]);
+  const flowWindow = useMemo(() => scopedWindow(features, currentTimestamp), [features, currentTimestamp]);
+  const {
+    legs: flowLegs,
+    unavailable: flowUnavailable,
+    reason: flowReason,
+  } = useFlowLegs(flowWindow, flowCorridorsEnabled);
   const clusters = useMemo(() => districtClusters(features, currentTimestamp), [features, currentTimestamp]);
   const density = useMemo(
     () => densityScore(features, currentTimestamp, data.totalDistrictsInScope),
@@ -133,6 +142,11 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
               onSelectFeature={setSelectedId}
               timePath={pathCoords}
               clusters={clusters.map((c) => ({ lng: c.lng, lat: c.lat, tier: c.tier, label: c.district }))}
+              flowLegs={flowLegs}
+              flowCorridorsEnabled={flowCorridorsEnabled}
+              onFlowCorridorsEnabledChange={setFlowCorridorsEnabled}
+              flowUnavailable={flowUnavailable}
+              flowReason={flowReason}
             />
 
             <TimelinePanel

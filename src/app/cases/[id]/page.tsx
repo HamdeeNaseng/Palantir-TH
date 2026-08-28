@@ -9,6 +9,7 @@ import {
 } from "@tabler/icons-react";
 import TopNav from "@/components/layout/TopNav";
 import CaseLocationMap from "@/components/cases/CaseLocationMap";
+import CaseEditPanel from "@/components/cases/CaseEditPanel";
 import MediaThumb from "@/components/cases/MediaThumb";
 import { EVENT_COLOR, VERIFICATION_COLOR } from "@/lib/palette";
 import {
@@ -18,6 +19,7 @@ import {
   VERIFICATION_LABEL,
 } from "@/lib/labels";
 import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
+import type { CaseCorrectionDoc } from "@/lib/types";
 import { formatByPrecision, formatThaiDateLong, formatThaiDateTime } from "@/lib/datetime";
 import { getCaseDetail, type CaseDetail } from "@/server/cases";
 
@@ -101,12 +103,23 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
   // never propagates onward even as inert baggage.
   const safeRef = ref && (ref === back.prefix || ref.startsWith(`${back.prefix}?`)) ? ref : undefined;
   const e = detail.event;
-  const typeColor = EVENT_COLOR[e.event.type] ?? EVENT_COLOR.other;
-  const verificationColor = VERIFICATION_COLOR[e.verification];
-  const coordinates = e.location.geo?.coordinates ?? null;
+  // `current` is the case after analyst corrections; `e` stays the source's
+  // own claim. The header, the map and the register all describe what the
+  // system currently believes, while the facts panel below quotes the source.
+  const current = detail.effective.event;
+  const typeColor = EVENT_COLOR[current.event.type] ?? EVENT_COLOR.other;
+  const verificationColor = VERIFICATION_COLOR[current.verification];
+  const coordinates = current.location.geo?.coordinates ?? null;
   const [lng, lat] = coordinates ?? [0, 0];
-  const precision = e.location.geo_precision ?? "unknown";
+  const precision = current.location.geo_precision ?? "unknown";
   const precisionM = GEO_PRECISION_RADIUS_M[precision];
+  /**
+   * The address-derived position, used only when no coordinate was published.
+   * Held separately from `coordinates` throughout so the two can never be
+   * rendered by the same branch — an estimate and a reported point are
+   * different claims and the page has to say which one it is showing.
+   */
+  const estimate = coordinates ? null : detail.locationFallback;
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
@@ -149,13 +162,13 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
                   background: `${verificationColor}1f`,
                 }}
               >
-                {VERIFICATION_LABEL[e.verification]}
+                {VERIFICATION_LABEL[current.verification]}
               </span>
               <span
                 className="chip"
                 style={{ color: typeColor, borderColor: `${typeColor}66`, background: `${typeColor}1f` }}
               >
-                {EVENT_TYPE_LABEL[e.event.type]}
+                {EVENT_TYPE_LABEL[current.event.type]}
               </span>
               <span className="chip num border-[rgba(56,100,150,0.6)] text-ink-dim">
                 ความเชื่อมั่น {e.confidence}%
@@ -167,6 +180,12 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
         {/* ----------------------------------------------------------- body */}
         <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_clamp(300px,26vw,360px)]">
           <div className="flex min-w-0 flex-col gap-2">
+            <CaseEditPanel
+              event={current}
+              history={detail.effective.history}
+              locationFallback={detail.locationFallback}
+            />
+
             <Panel title="ข้อเท็จจริงที่แหล่งข้อมูลรายงาน">
               <dl className="grid grid-cols-1 gap-x-6 gap-y-0 px-4 py-1 sm:grid-cols-2">
                 <Fact label="เวลาเกิดเหตุ" value={formatByPrecision(e.time.start, e.time.precision)}>
@@ -208,9 +227,13 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
               title="ตำแหน่งที่เกิดเหตุ"
               action={
                 <span className="text-[10.5px] text-ink-muted">
-                  {coordinates
-                    ? <>ความละเอียด: {GEO_PRECISION_LABEL[precision]} · คลาดเคลื่อนราว{" "}<span className="num">{(precisionM / 1000).toLocaleString("en-US")}</span> กม.</>
-                    : "มีที่อยู่ แต่แหล่งข้อมูลไม่เผยแพร่พิกัด"}
+                  {coordinates ? (
+                    <>ความละเอียด: {GEO_PRECISION_LABEL[precision]} · คลาดเคลื่อนราว{" "}<span className="num">{(precisionM / 1000).toLocaleString("en-US")}</span> กม.</>
+                  ) : estimate ? (
+                    <span className="text-amber">ประมาณจากที่อยู่ · {GEO_PRECISION_LABEL[estimate.precision]}</span>
+                  ) : (
+                    "มีที่อยู่ แต่แหล่งข้อมูลไม่เผยแพร่พิกัด"
+                  )}
                 </span>
               }
             >
@@ -226,10 +249,41 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
                       : `ไม่ใช่พิกัดจุดเกิดเหตุจริง แต่เป็นจุดอ้างอิงระดับ${GEO_PRECISION_LABEL[precision]} วงกลมบนแผนที่คือขอบเขตความคลาดเคลื่อนที่ควรอ่านค่านี้`}
                   </p>
                 </>
+              ) : estimate ? (
+                /* No published coordinate, but the address names a ตำบล/อำเภอ
+                   this app has a polygon for. Showing that area is more useful
+                   than a paragraph — but it is drawn as a hollow ring inside a
+                   full-size uncertainty circle, and captioned as an estimate,
+                   so it cannot be mistaken for a reported position. */
+                <>
+                  <div className="h-[300px] w-full">
+                    <CaseLocationMap
+                      lng={estimate.centre[0]}
+                      lat={estimate.centre[1]}
+                      precisionM={GEO_PRECISION_RADIUS_M[estimate.precision]}
+                      color={typeColor}
+                      estimated
+                    />
+                  </div>
+                  <p className="border-t border-[rgba(37,66,102,0.45)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-muted">
+                    <span className="text-amber">ตำแหน่งโดยประมาณ</span> — แหล่งข้อมูลไม่ได้เผยแพร่พิกัด
+                    จุดนี้คำนวณจากที่อยู่ที่รายงาน ({estimate.label}) จึงเป็นจุดกึ่งกลางของพื้นที่
+                    {estimate.precision === "subdistrict" ? "ระดับตำบล" : "ระดับอำเภอ"} ไม่ใช่จุดเกิดเหตุ
+                    วงกลมคือขอบเขตที่เหตุอาจอยู่ได้จริง
+                  </p>
+                  {e.location.place && (
+                    <p className="border-t border-[rgba(37,66,102,0.3)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-dim">
+                      ที่อยู่ตามรายงาน: {e.location.place}
+                    </p>
+                  )}
+                </>
               ) : (
                 <div className="px-4 py-5 text-[11.5px] leading-relaxed text-ink-dim">
                   <p>{e.location.place ?? `${e.location.district}, ${e.location.province}`}</p>
-                  <p className="mt-2 text-ink-muted">ยังไม่ปักหมุดบนแผนที่ เพราะหลักฐานต้นทางไม่ได้เผยแพร่พิกัดที่ตรวจสอบได้</p>
+                  <p className="mt-2 text-ink-muted">
+                    ยังไม่ปักหมุดบนแผนที่ เพราะหลักฐานต้นทางไม่ได้เผยแพร่พิกัดที่ตรวจสอบได้
+                    และระบบจับคู่ตำบล/อำเภอกับขอบเขต DDPM ไม่ได้
+                  </p>
                 </div>
               )}
             </Panel>
@@ -267,6 +321,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
 
           {/* ------------------------------------------------------- sidebar */}
           <div className="flex flex-col gap-2">
+            <CorrectionHistoryPanel history={detail.effective.history} />
             <ProvenancePanel detail={detail} />
             <UnreportedPanel unreported={e.unreported} />
             <NearbyPanel detail={detail} listRef={safeRef} />
@@ -495,6 +550,55 @@ function UnreportedPanel({ unreported }: { unreported: string[] }) {
       </ul>
       <p className="border-t border-[rgba(37,66,102,0.45)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-muted">
         ฟิลด์เหล่านี้ว่างเพราะแหล่งข้อมูลไม่มีข้อมูลให้ ไม่ใช่เพราะค่าเป็นศูนย์
+      </p>
+    </Panel>
+  );
+}
+
+/** Thai labels for the correctable fields — the audit trail's vocabulary. */
+const CORRECTION_FIELD_LABEL: Record<string, string> = {
+  geo: "พิกัด",
+  event_type: "ประเภทเหตุการณ์",
+  severity: "ระดับความรุนแรง",
+  verification: "สถานะการยืนยัน",
+  killed: "ผู้เสียชีวิต",
+  injured: "ผู้บาดเจ็บ",
+  summary: "รายละเอียด",
+};
+
+/**
+ * Every correction ever written for this case, newest first.
+ *
+ * Shown unconditionally once one exists, and never collapsed into "edited":
+ * the whole reason corrections are a separate append-only layer is that a
+ * reader can see the system's current answer *and* who changed it away from
+ * what the source published.
+ */
+function CorrectionHistoryPanel({ history }: { history: CaseCorrectionDoc[] }) {
+  if (history.length === 0) return null;
+
+  return (
+    <Panel
+      title="ประวัติการแก้ไขโดยนักวิเคราะห์"
+      action={<span className="num text-[10.5px] text-ink-muted">{history.length} ครั้ง</span>}
+    >
+      <ul>
+        {history.map((c) => (
+          <li key={c._id} className="border-t border-[rgba(37,66,102,0.3)] px-4 py-2 first:border-0">
+            <p className="num text-[10.5px] text-ink-muted">{formatThaiDateTime(c.corrected_at)}</p>
+            <p className="mt-0.5 text-[11.5px] text-ink-dim">
+              แก้ {Object.keys(c.changes).map((k) => CORRECTION_FIELD_LABEL[k] ?? k).join(", ")}
+            </p>
+            {c.note && <p className="mt-0.5 text-[10.5px] text-ink-muted">เหตุผล: {c.note}</p>}
+            <p className="mt-0.5 text-[10px] text-ink-muted">
+              {/* Never presented as verified — there is no auth behind it. */}
+              โดย {c.corrected_by ?? "ไม่ระบุ"} (ไม่ได้ยืนยันตัวตน)
+            </p>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-[rgba(37,66,102,0.45)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-muted">
+        ข้อมูลเดิมจากแหล่งข้อมูลยังอยู่ครบ การแก้ไขถูกเก็บเป็นชั้นแยกและย้อนกลับได้
       </p>
     </Panel>
   );

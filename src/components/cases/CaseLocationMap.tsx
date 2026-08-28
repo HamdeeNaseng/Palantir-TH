@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import Map, {
   AttributionControl,
   Layer,
+  Marker,
   NavigationControl,
   Source,
   type LayerProps,
@@ -13,6 +14,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { IconSatellite } from "@tabler/icons-react";
 import {
+  SATELLITE_DEFAULT_ON,
   SATELLITE_SOURCE_ID,
   satelliteLayer,
   satelliteSource,
@@ -160,37 +162,87 @@ const POINT_LAYER = {
   },
 } satisfies LayerProps;
 
+/**
+ * The same position when it was *derived* from an address rather than
+ * reported — a hollow ring instead of a filled dot.
+ *
+ * A solid dot is this app's symbol for "someone measured this". An estimate
+ * from a ตำบล name is a different kind of claim, and drawing it identically
+ * would make the uncertainty ring the only thing distinguishing them, which
+ * is too easy to read past at a glance.
+ */
+const ESTIMATED_POINT_LAYER = {
+  id: "here-point-estimated",
+  type: "circle",
+  paint: {
+    "circle-color": "transparent",
+    "circle-radius": 5,
+    "circle-stroke-color": ["get", "color"],
+    "circle-stroke-width": 2,
+    "circle-stroke-opacity": 0.9,
+  },
+} satisfies LayerProps;
+
 export default function CaseLocationMap({
   lng,
   lat,
   precisionM,
   color,
+  centre,
+  estimated = false,
+  editable = false,
+  onMove,
 }: {
-  lng: number;
-  lat: number;
+  /** null when the case has no coordinates yet — the map still renders, with no pin. */
+  lng: number | null;
+  lat: number | null;
   precisionM: number;
   color: string;
+  /**
+   * Lets an analyst correct the placement by dragging the marker or clicking
+   * the map. Off everywhere except the case page's edit mode, so the ordinary
+   * read-only view cannot be nudged by a stray drag.
+   */
+  editable?: boolean;
+  /**
+   * Where to frame when there is no pin — the case's own ตำบล/อำเภอ. Only a
+   * viewport, never drawn: a centroid rendered as a dot is the "looks like a
+   * GPS fix and is not one" mistake this component exists to avoid.
+   */
+  centre?: [number, number];
+  /**
+   * The point was derived from the address rather than reported by the
+   * source. Drawn as a hollow ring so it never reads as a measured fix.
+   */
+  estimated?: boolean;
+  /** Fires with the new position on every drag-end or map click while editable. */
+  onMove?: (next: { lng: number; lat: number }) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
-  const [satellite, setSatellite] = useState(false);
+  const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [detail, setDetail] = useState(false);
 
   // Built once: the base style carries no case-specific data any more, so it
   // never needs re-issuing to MapLibre.
   const mapStyle = useMemo(() => style(), []);
 
+  const placed = lng !== null && lat !== null;
+  const view: [number, number] = placed ? [lng, lat] : (centre ?? [101.25, 6.6]);
+
   const here = useMemo(
     () => ({
       type: "FeatureCollection" as const,
-      features: [
-        {
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [lng, lat] },
-          properties: { precision_m: precisionM, color },
-        },
-      ],
+      features: placed
+        ? [
+            {
+              type: "Feature" as const,
+              geometry: { type: "Point" as const, coordinates: [lng, lat] },
+              properties: { precision_m: precisionM, color },
+            },
+          ]
+        : [],
     }),
-    [lng, lat, precisionM, color],
+    [placed, lng, lat, precisionM, color],
   );
 
   const applySatellite = useCallback((next: boolean) => {
@@ -204,7 +256,7 @@ export default function CaseLocationMap({
       <Map
         ref={mapRef}
         initialViewState={{
-          bounds: boundsAround(lng, lat, precisionM),
+          bounds: boundsAround(view[0], view[1], placed ? precisionM : 6000),
           fitBoundsOptions: { padding: 24 },
         }}
         mapStyle={mapStyle}
@@ -215,6 +267,11 @@ export default function CaseLocationMap({
         style={{ width: "100%", height: "100%" }}
         attributionControl={false}
         dragRotate={false}
+        cursor={editable ? "crosshair" : undefined}
+        // Click-to-place as well as drag: at district-centroid zoom the marker
+        // can be most of a screen away from where it belongs, and dragging it
+        // that far is worse than pointing at the right spot.
+        onClick={editable && onMove ? (e) => onMove({ lng: e.lngLat.lng, lat: e.lngLat.lat }) : undefined}
         // MapLibre swallows style and source failures unless you listen.
         onError={(e) => console.error("[maplibre]", e.error?.message ?? String(e))}
         // Re-applies the choice to a freshly loaded style, so toggling
@@ -242,8 +299,28 @@ export default function CaseLocationMap({
 
         <Source id="here" type="geojson" data={here}>
           <Layer {...UNCERTAINTY_LAYER} />
-          <Layer {...POINT_LAYER} />
+          {/* The GeoJSON dot is hidden while editing — a draggable Marker
+              stands in for it, so there is exactly one thing on screen
+              representing the position rather than two that can disagree
+              mid-drag. */}
+          {!editable && placed && (
+            <Layer {...(estimated ? ESTIMATED_POINT_LAYER : POINT_LAYER)} />
+          )}
         </Source>
+
+        {editable && placed && (
+          <Marker
+            longitude={lng}
+            latitude={lat}
+            draggable
+            onDragEnd={(e) => onMove?.({ lng: e.lngLat.lng, lat: e.lngLat.lat })}
+          >
+            <span
+              className="block h-3.5 w-3.5 cursor-grab rounded-full border-2 border-white shadow-[0_0_0_3px_rgba(0,0,0,0.35)] active:cursor-grabbing"
+              style={{ background: color }}
+            />
+          </Marker>
+        )}
       </Map>
 
       <button

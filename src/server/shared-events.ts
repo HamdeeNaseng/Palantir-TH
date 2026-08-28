@@ -98,8 +98,12 @@ export async function loadBundle(): Promise<RawBundle> {
     ]);
 
     return { sources, events, citizenReports, ingestionRuns, cases, live: sources.length > 0 };
-  } catch {
-    // Database unavailable: preserve an honest empty state.
+  } catch (err) {
+    // Database unavailable: preserve an honest empty state, but never swallow
+    // the reason. A bare `catch {}` here is why a production outage showed up
+    // only as the "sample data" banner, with nothing in the Vercel logs to say
+    // whether the URI was wrong, the IP was not allowlisted, or auth failed.
+    console.error("[loadBundle] MongoDB unavailable, serving empty state:", err);
   }
 
   return {
