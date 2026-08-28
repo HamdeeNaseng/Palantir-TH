@@ -7,8 +7,9 @@ import { defineConfig, devices } from "@playwright/test";
  * permission prompt, a `navigator.geolocation` fix, a WebGL canvas and a
  * dragged marker actually combine into a usable report on a phone.
  *
- * The two projects are not the same suite at two sizes. `desktop` runs
- * everything. `mobile` runs the citizen intake plus `responsive.spec.ts`: the
+ * The two projects are not the same suite at two sizes. `desktop` runs the
+ * browser-behaviour specs, while `mobile` runs the citizen intake plus
+ * `responsive.spec.ts`: the
  * analyst pages no longer declare themselves desktop-only (the `min-w-[1180px]`
  * floors are now `lg:` and the console stacks into one column below that), so
  * "does not fall apart at 393 px" became a promise worth holding them to.
@@ -46,7 +47,13 @@ export default defineConfig({
   },
 
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "desktop",
+      use: { ...devices["Desktop Chrome"] },
+      // Every assertion in this file describes phone-only behavior, including
+      // the off-canvas drawer that deliberately becomes a static rail at `lg`.
+      testIgnore: /responsive\.spec\.ts/,
+    },
     { name: "mobile", use: { ...devices["Pixel 5"] }, testMatch: MOBILE_SPECS },
   ],
 
