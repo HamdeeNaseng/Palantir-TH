@@ -1,6 +1,7 @@
 import { COLLECTIONS, getDb } from "@/lib/mongodb";
 import { EVENT_COLOR } from "@/lib/palette";
 import { RANGE_DAYS, type InvestigationFilters } from "@/lib/filters";
+import { TRUSTED_SCORE_FLOOR } from "@/lib/snapshot";
 import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
 import type {
   CaseDoc,
@@ -69,8 +70,12 @@ export interface EventFeatureCollection {
  * this filter set actually match".
  */
 
-/** Sources at or above this trust score satisfy "เฉพาะแหล่งข้อมูลที่เชื่อถือได้". */
-export const TRUSTED_SCORE_FLOOR = 70;
+/**
+ * Re-exported rather than declared: `@/lib/snapshot` owns this now, because the
+ * browser applies the same "เฉพาะแหล่งข้อมูลที่เชื่อถือได้" condition against its
+ * cached copy. Two constants that must agree is one more than there should be.
+ */
+export { TRUSTED_SCORE_FLOOR } from "@/lib/snapshot";
 
 export interface RawBundle {
   sources: SourceRegistryDoc[];

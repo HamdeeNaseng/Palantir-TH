@@ -1,18 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
-  serializeFilters,
   type InvestigationFilters,
 } from "@/lib/filters";
 import { fromInputDateTime, toInputDateTime } from "@/lib/datetime";
-import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
+import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
 import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
 
 /**
@@ -22,6 +20,11 @@ import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
  * cross-page dependency to share), plus facet counts from the server and a
  * new, NOT URL-persisted "การตั้งค่าการเล่น" section — the playhead is
  * ephemeral session state, not a filter.
+ *
+ * Applying no longer navigates. `onApply` hands the selection to
+ * `EventsWorkspace`, which re-derives the page from the dataset already in the
+ * browser; the URL still updates, but through the History API rather than a
+ * round trip. See `@/lib/use-local-filters`.
  */
 
 function toggle<T>(list: T[], value: T): T[] {
@@ -81,6 +84,10 @@ function Check({
 export default function EventsFilterSidebar({
   initial,
   facets,
+  onApply,
+  onReset,
+  pending = false,
+  footerNote,
   playbackStartMs,
   playbackEndMs,
   spanStartMs,
@@ -91,6 +98,10 @@ export default function EventsFilterSidebar({
 }: {
   initial: InvestigationFilters;
   facets: EventsWorkspaceData["facets"];
+  onApply: (filters: InvestigationFilters) => void;
+  onReset: () => void;
+  pending?: boolean;
+  footerNote?: React.ReactNode;
   playbackStartMs: number;
   playbackEndMs: number;
   spanStartMs: number;
@@ -99,18 +110,22 @@ export default function EventsFilterSidebar({
   autoPlay: boolean;
   onAutoPlayChange: (v: boolean) => void;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [f, setF] = useState<InvestigationFilters>(initial);
+
+  // Back, Forward, or a fallback navigation changed the applied filters
+  // elsewhere; the draft in the sidebar follows rather than silently
+  // contradicting the page beside it.
+  useEffect(() => {
+    setF(initial);
+  }, [initial]);
 
   const patch = (next: Partial<InvestigationFilters>) => setF((prev) => ({ ...prev, ...next }));
 
-  const apply = () =>
-    startTransition(() => router.push(`/events?${serializeFilters(f)}`, { scroll: false }));
+  const apply = () => onApply(f);
 
   const reset = () => {
     setF(DEFAULT_FILTERS);
-    startTransition(() => router.push("/events", { scroll: false }));
+    onReset();
   };
 
   const activeCount =
@@ -129,6 +144,7 @@ export default function EventsFilterSidebar({
       onApply={apply}
       pending={pending}
       activeCount={activeCount}
+      footerNote={footerNote}
     >
         <Section title="ช่วงเวลา">
           <div className="overflow-hidden rounded border border-[rgba(37,66,102,0.6)]">

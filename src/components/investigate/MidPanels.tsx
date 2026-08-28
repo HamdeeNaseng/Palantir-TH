@@ -11,7 +11,7 @@ import {
 import StackedArea from "@/components/charts/StackedArea";
 import { ScoreBar } from "@/components/charts/Gauges";
 import { SEVERITY_COLOR } from "@/lib/labels";
-import type { InvestigationDashboard } from "@/server/investigate";
+import type { InvestigationDashboard } from "@/lib/view-models/investigate";
 
 function PanelHead({ title, action }: { title: string; action?: React.ReactNode }) {
   return (
@@ -225,7 +225,7 @@ export function RecentEventsPanel({
                 className="border-t border-[rgba(37,66,102,0.3)] hover:bg-[rgba(56,189,248,0.05)]"
               >
                 <td className="num px-3.5 py-[7px] text-[11px] whitespace-nowrap text-ink-dim">
-                  {fmt.format(r.at)}
+                  {fmt.format(new Date(r.atMs))}
                 </td>
                 <td className="py-[7px] text-[11.5px] whitespace-nowrap text-ink">{r.type}</td>
                 <td className="py-[7px] text-[11.5px] whitespace-nowrap text-ink-dim">{r.district}</td>

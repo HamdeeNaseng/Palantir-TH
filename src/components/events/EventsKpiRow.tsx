@@ -2,7 +2,7 @@ import { IconCalendarTime, IconGauge, IconPlayerPlay, IconTarget } from "@tabler
 import Sparkline from "@/components/charts/Sparkline";
 import { RiskMeter } from "@/components/charts/Gauges";
 import type { DensityScore } from "@/lib/events-replay";
-import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
+import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
 
 /**
  * The 4 KPI cards from the mockup. Distinct from `/investigate`'s `KpiRow` —
