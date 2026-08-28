@@ -58,8 +58,14 @@ export interface HotspotRow {
   label: string;
   /** Signed percent above the expected count. */
   delta: number;
-  /** Poisson upper-tail p-value — lower is more significant. */
+  /** Raw Poisson upper-tail p-value — lower is more significant. */
   p: number;
+  /**
+   * Benjamini-Hochberg adjusted p-value (q-value) across every key tested in
+   * the same scan. This, not `p`, is what `alpha` is compared against — see
+   * `detectHotspots`.
+   */
+  q: number;
 }
 
 export interface HotspotResult {
@@ -72,6 +78,7 @@ export interface HotspotOptions {
   baselineDays?: number;
   /** Ignore keys too sparse for the Poisson comparison to say anything. */
   minBaseline?: number;
+  /** Target false-discovery rate, applied to the BH-adjusted q-values. */
   alpha?: number;
   /** How many rows `hotspots` keeps, sorted most-significant first. */
   limit?: number;
@@ -86,6 +93,28 @@ const DEFAULT_HOTSPOT_OPTIONS: Required<HotspotOptions> = {
 };
 
 /**
+ * Benjamini-Hochberg adjusted p-values, returned in the input order.
+ *
+ * `q[i] <= alpha` is exactly the BH rejection rule at false-discovery rate
+ * `alpha`, so callers never have to find the step-up cutoff themselves. The
+ * step-up is a single pass from the largest p-value down, carrying the running
+ * minimum of `m * p / rank` so the result stays monotone in `p`.
+ */
+export function benjaminiHochberg(ps: number[]): number[] {
+  const m = ps.length;
+  if (m === 0) return [];
+  const order = ps.map((p, i) => i).sort((a, b) => ps[a] - ps[b]);
+  const q = new Array<number>(m);
+  let running = 1;
+  for (let rank = m; rank >= 1; rank--) {
+    const idx = order[rank - 1];
+    running = Math.min(running, (ps[idx] * m) / rank);
+    q[idx] = Math.max(0, Math.min(1, running));
+  }
+  return q;
+}
+
+/**
  * Find keys reporting materially more than expected recently.
  *
  * The expectation is conditioned on the *overall* change across all keys over
@@ -97,31 +126,77 @@ const DEFAULT_HOTSPOT_OPTIONS: Required<HotspotOptions> = {
  *
  * Significance is a Poisson upper-tail test, so a key with a small baseline
  * cannot top the list on a couple of extra events.
+ *
+ * That test is then run once per key, and a raw `p < alpha` threshold on a
+ * scan of hundreds of districts would manufacture roughly `alpha * m` hotspots
+ * out of pure noise — at 900 districts and alpha 0.05, ~45 confident-looking
+ * false alarms every render. So the p-values are corrected with
+ * Benjamini-Hochberg and `alpha` is read as a false-discovery rate over the
+ * whole scan: of the keys reported, at most `alpha` of them are expected to be
+ * noise, however many keys were tested.
  */
 export function detectHotspots(
   items: HotspotItem[],
   endMs: number,
   opts: HotspotOptions = {},
 ): HotspotResult {
-  const { recentDays, baselineDays, minBaseline, alpha, limit } = {
-    ...DEFAULT_HOTSPOT_OPTIONS,
-    ...opts,
-  };
+  const { recentDays, baselineDays, ...rest } = { ...DEFAULT_HOTSPOT_OPTIONS, ...opts };
 
-  const stats = new Map<string, { recent: number; before: number }>();
+  const counts: HotspotCounts = new Map();
   for (const item of items) {
-    const s = stats.get(item.key) ?? { recent: 0, before: 0 };
-    if (endMs - item.atMs <= recentDays * DAY_MS) s.recent += 1;
-    else if (endMs - item.atMs <= (recentDays + baselineDays) * DAY_MS) s.before += 1;
-    stats.set(item.key, s);
+    tallyHotspot(counts, item.key, endMs - item.atMs, recentDays, baselineDays);
   }
+  return detectHotspotsFromCounts(counts, rest);
+}
 
-  const rows = [...stats.entries()];
+/** How many observations a key has in each window. */
+export type HotspotCounts = Map<string, { recent: number; before: number }>;
+
+/**
+ * Adds one observation to `counts`, in whichever window its age falls.
+ *
+ * The recent/baseline boundary arithmetic lives here and nowhere else, so a
+ * caller that already has its data grouped can accumulate straight into a
+ * `HotspotCounts` and skip building an intermediate `HotspotItem[]` — which is
+ * what `districtClusters` does on `/events`, once per playhead tick over every
+ * event played so far. A key outside both windows is still recorded (with no
+ * increment) exactly as it was when this loop lived inline: it changes no
+ * result, since `minBaseline` filters it out either way, but it keeps the two
+ * paths identical rather than nearly so.
+ */
+export function tallyHotspot(
+  counts: HotspotCounts,
+  key: string,
+  ageMs: number,
+  recentDays: number,
+  baselineDays: number,
+): void {
+  const s = counts.get(key) ?? { recent: 0, before: 0 };
+  if (ageMs <= recentDays * DAY_MS) s.recent += 1;
+  else if (ageMs <= (recentDays + baselineDays) * DAY_MS) s.before += 1;
+  counts.set(key, s);
+}
+
+/**
+ * The statistics half of `detectHotspots`, over counts that are already
+ * grouped. Takes no `recentDays`/`baselineDays`: by this point the windows
+ * have done their job and every number here is a plain count.
+ */
+export function detectHotspotsFromCounts(
+  counts: HotspotCounts,
+  opts: Pick<HotspotOptions, "minBaseline" | "alpha" | "limit"> = {},
+): HotspotResult {
+  const { minBaseline, alpha, limit } = { ...DEFAULT_HOTSPOT_OPTIONS, ...opts };
+
+  const rows = [...counts.entries()];
   const totalRecent = rows.reduce((sum, [, s]) => sum + s.recent, 0);
   const totalBefore = rows.reduce((sum, [, s]) => sum + s.before, 0);
   if (!totalRecent || !totalBefore) return { hotspots: [], significantCount: 0 };
 
-  const scored = rows
+  // Every key that cleared `minBaseline` is one hypothesis tested, including
+  // the quiet ones: the correction is only honest if `m` counts the whole
+  // scan, not just the keys that happened to come out above expectation.
+  const tested = rows
     .filter(([, s]) => s.before >= minBaseline)
     .map(([label, s]) => {
       const expected = (s.before / totalBefore) * totalRecent;
@@ -132,11 +207,13 @@ export function detectHotspots(
         delta: Math.round((s.recent / expected - 1) * 100),
         p: poissonUpperTail(s.recent, expected),
       };
-    })
-    .filter((r) => r.observed > r.expected)
-    .sort((a, b) => a.p - b.p);
+    });
 
-  const significant = scored.filter((r) => r.p < alpha);
+  const qs = benjaminiHochberg(tested.map((r) => r.p));
+  const significant = tested
+    .map((r, i) => ({ ...r, q: qs[i] }))
+    .filter((r) => r.observed > r.expected && r.q <= alpha)
+    .sort((a, b) => a.p - b.p);
 
   return {
     // Only surface keys that clear the significance bar — an empty list is
@@ -146,6 +223,7 @@ export function detectHotspots(
       label: r.label,
       delta: r.delta,
       p: r.p,
+      q: r.q,
     })),
     significantCount: significant.length,
   };
@@ -239,6 +317,29 @@ export function bucketList(
     });
   }
   return buckets;
+}
+
+/**
+ * Which bucket `ms` falls in, or -1 when it falls outside them all.
+ *
+ * The alternative — `index.get(bucketKey(new Date(ms), unit))` — allocates a
+ * `Date` and a key string per lookup, and the callers here do one lookup per
+ * event: the trend chart, three KPI sparklines and the `/events` histogram all
+ * walk the full matched set. A binary search over contiguous buckets is five
+ * comparisons and no allocation, and answers the same question, because
+ * `bucketList` emits buckets that tile `[startMs, endMs)` in order and
+ * `bucketKey` is constant within each one.
+ */
+export function bucketIndexOf(buckets: Bucket[], ms: number): number {
+  let lo = 0;
+  let hi = buckets.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (ms < buckets[mid].startMs) hi = mid - 1;
+    else if (ms >= buckets[mid].endMs) lo = mid + 1;
+    else return mid;
+  }
+  return -1;
 }
 
 export const BUCKET_LABEL: Record<BucketUnit, string> = {
