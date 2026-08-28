@@ -69,7 +69,7 @@ export default function CaseSearchBar({
         }}
         placeholder="ค้นหาหัวข้อ ตำบล อำเภอ ประเภทของแหล่งข้อมูล หรือรหัสเคส แล้วกด Enter"
         aria-label="ค้นหาเคส"
-        className="h-8 w-full rounded border border-[rgba(37,66,102,0.8)] bg-[#0a1524] pr-16 pl-8 text-[12px] text-ink placeholder:text-ink-muted focus:border-azure focus:outline-none"
+        className="h-11 w-full rounded border border-[rgba(37,66,102,0.8)] bg-[#0a1524] pr-16 pl-8 text-[16px] text-ink placeholder:text-ink-muted focus:border-azure focus:outline-none sm:h-8 sm:text-[12px]"
       />
 
       {q && (
@@ -81,7 +81,7 @@ export default function CaseSearchBar({
             go("");
             input.current?.focus();
           }}
-          className="absolute top-1/2 right-14 -translate-y-1/2 text-ink-muted hover:text-ink"
+          className="absolute top-1/2 right-16 flex h-9 w-7 -translate-y-1/2 items-center justify-center text-ink-muted hover:text-ink sm:right-14 sm:h-auto sm:w-auto"
         >
           <IconX size={13} stroke={2} />
         </button>
@@ -89,7 +89,7 @@ export default function CaseSearchBar({
 
       <button
         type="submit"
-        className="absolute top-1/2 right-1 h-6 -translate-y-1/2 rounded bg-[rgba(56,189,248,0.16)] px-2.5 text-[11px] text-azure hover:bg-[rgba(56,189,248,0.28)]"
+        className="absolute top-1/2 right-1 h-9 -translate-y-1/2 rounded bg-[rgba(56,189,248,0.16)] px-3 text-[12.5px] text-azure hover:bg-[rgba(56,189,248,0.28)] sm:h-6 sm:px-2.5 sm:text-[11px]"
       >
         ค้นหา
       </button>

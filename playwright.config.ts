@@ -7,13 +7,14 @@ import { defineConfig, devices } from "@playwright/test";
  * permission prompt, a `navigator.geolocation` fix, a WebGL canvas and a
  * dragged marker actually combine into a usable report on a phone.
  *
- * The two projects are not the same suite at two sizes. `desktop` runs
- * everything. `mobile` runs only the citizen intake, because that is the only
- * surface this app claims works on a phone — the analyst pages are declared
- * desktop-only in their own layouts (`min-w-[900px]` and up), and asserting a
- * dense dashboard at 393 px would be testing a promise nobody made.
+ * The two projects are not the same suite at two sizes. `desktop` runs the
+ * browser-behaviour specs, while `mobile` runs the citizen intake plus
+ * `responsive.spec.ts`: the
+ * analyst pages no longer declare themselves desktop-only (the `min-w-[1180px]`
+ * floors are now `lg:` and the console stacks into one column below that), so
+ * "does not fall apart at 393 px" became a promise worth holding them to.
  */
-const CITIZEN_SPECS = /report-.*\.spec\.ts/;
+const MOBILE_SPECS = /(report-.*|responsive)\.spec\.ts/;
 
 const PORT = Number(process.env.E2E_PORT) || 3100;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -46,8 +47,14 @@ export default defineConfig({
   },
 
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile", use: { ...devices["Pixel 5"] }, testMatch: CITIZEN_SPECS },
+    {
+      name: "desktop",
+      use: { ...devices["Desktop Chrome"] },
+      // Every assertion in this file describes phone-only behavior, including
+      // the off-canvas drawer that deliberately becomes a static rail at `lg`.
+      testIgnore: /responsive\.spec\.ts/,
+    },
+    { name: "mobile", use: { ...devices["Pixel 5"] }, testMatch: MOBILE_SPECS },
   ],
 
   webServer: {

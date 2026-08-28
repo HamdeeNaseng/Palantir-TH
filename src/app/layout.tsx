@@ -10,6 +10,11 @@ export const viewport: Viewport = {
   themeColor: "#04070e",
   width: "device-width",
   initialScale: 1,
+  // Paint under the notch so the dark console reaches the edge of the screen;
+  // the bars that would land underneath it claim the inset back with the
+  // `px-safe` / `pb-safe` utilities. No `maximumScale`: this is a page people
+  // will want to pinch into, and capping zoom is an accessibility regression.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

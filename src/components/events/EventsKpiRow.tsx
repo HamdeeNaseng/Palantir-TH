@@ -20,10 +20,10 @@ export default function EventsKpiRow({
   const playedPct = data.totalMatched > 0 ? Math.round((playedCount / data.totalMatched) * 100) : 0;
 
   return (
-    <div className="grid h-full grid-cols-4 gap-2">
+    <div className="grid h-full grid-cols-2 gap-2 sm:grid-cols-4">
       <article className="panel flex h-full items-start gap-3 px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] text-ink-dim">เหตุการณ์ทั้งหมด</p>
+          <p className="text-[12px] leading-snug text-ink-dim sm:truncate">เหตุการณ์ทั้งหมด</p>
           <p className="num mt-0.5 text-[26px] leading-none font-semibold tracking-tight text-ink">
             {data.totalMatched.toLocaleString("en-US")}
           </p>
@@ -31,13 +31,15 @@ export default function EventsKpiRow({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <IconTarget size={17} stroke={1.7} className="text-azure/80" />
-          <Sparkline points={data.histogram.buckets.map((b) => b.count)} />
+          <span className="hidden sm:block">
+            <Sparkline points={data.histogram.buckets.map((b) => b.count)} />
+          </span>
         </div>
       </article>
 
       <article className="panel flex h-full items-start gap-3 px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] text-ink-dim">ช่วงเวลาที่กำลังเล่น</p>
+          <p className="text-[12px] leading-snug text-ink-dim sm:truncate">ช่วงเวลาที่กำลังเล่น</p>
           {data.span ? (
             <>
               <p className="text-[15px] leading-tight font-semibold text-ink">{data.span.label}</p>
@@ -52,7 +54,7 @@ export default function EventsKpiRow({
 
       <article className="panel flex h-full items-start gap-3 px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] text-ink-dim">เหตุการณ์ที่เล่นไปแล้ว</p>
+          <p className="text-[12px] leading-snug text-ink-dim sm:truncate">เหตุการณ์ที่เล่นไปแล้ว</p>
           <p className="num mt-0.5 text-[26px] leading-none font-semibold tracking-tight text-ink">
             {playedCount.toLocaleString("en-US")}
             <span className="text-[14px] text-ink-muted"> / {data.totalMatched.toLocaleString("en-US")}</span>
@@ -69,7 +71,7 @@ export default function EventsKpiRow({
 
       <article className="panel flex h-full items-start gap-3 px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] text-ink-dim">ความหนาแน่นเหตุการณ์</p>
+          <p className="text-[12px] leading-snug text-ink-dim sm:truncate">ความหนาแน่นเหตุการณ์</p>
           <p
             className="mt-0.5 text-[20px] leading-none font-semibold"
             style={{

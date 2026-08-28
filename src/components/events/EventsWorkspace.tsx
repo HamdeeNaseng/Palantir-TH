@@ -119,17 +119,17 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
         onAutoPlayChange={setAutoPlay}
       />
 
-      <main className="min-w-0 flex-1 overflow-auto bg-abyss p-2">
+      <main className="min-w-0 flex-1 bg-abyss p-2 lg:overflow-auto">
         {!data.live && (
-          <p className="fixed top-[46px] right-3 z-50 rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
+          <p className="fixed top-[calc(var(--nav-h)_+_8px)] right-3 z-50 max-w-[92vw] rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
             กำลังแสดงสถานะไม่มีข้อมูล — ยังเชื่อมต่อ MongoDB ไม่ได้ ให้รัน{" "}
             <code className="font-mono">docker compose up -d</code> แล้ว{" "}
             <code className="font-mono">npm run db:seed</code>
           </p>
         )}
 
-        <div className="grid h-full min-h-[884px] grid-cols-[minmax(0,1fr)_clamp(300px,22vw,340px)] grid-rows-[minmax(560px,1.75fr)_minmax(260px,1fr)] gap-2">
-          <div className="grid min-h-0 grid-rows-[82px_minmax(220px,1fr)_128px] gap-2">
+        <div className="grid grid-cols-1 gap-2 lg:h-full lg:min-h-[884px] lg:grid-cols-[minmax(0,1fr)_clamp(300px,22vw,340px)] lg:grid-rows-[minmax(560px,1.75fr)_minmax(260px,1fr)]">
+          <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-rows-[82px_minmax(220px,1fr)_128px]">
             <EventsKpiRow data={data} playedCount={playedFeatures.length} density={density} />
 
             <MapPanel
@@ -164,7 +164,7 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
 
           <InspectSummaryPanel feature={inspectFeature} />
 
-          <div className="col-span-2 grid min-h-0 grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 lg:col-span-2 lg:min-h-0 lg:grid-cols-3">
             <EventsTrendPanel data={data} currentTimestamp={currentTimestamp} />
             <RecentPlayedPanel played={playedFeatures} />
             <PhenomenaSummaryPanel insights={phenomena.insights} />

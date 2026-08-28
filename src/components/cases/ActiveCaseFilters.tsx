@@ -23,10 +23,10 @@ function Chip({ label, href }: { label: string; href: string }) {
     <Link
       href={href}
       scroll={false}
-      className="chip border-[rgba(56,100,150,0.6)] bg-[rgba(56,189,248,0.08)] text-ink-dim hover:border-azure hover:text-ink"
+      className="chip min-h-9 max-w-full px-3 text-[12px] text-ink-dim hover:border-azure hover:text-ink sm:min-h-0 sm:px-2 sm:text-[11px] border-[rgba(56,100,150,0.6)] bg-[rgba(56,189,248,0.08)]"
     >
-      {label}
-      <IconX size={11} stroke={2.2} className="opacity-70" />
+      <span className="min-w-0 truncate">{label}</span>
+      <IconX size={13} stroke={2.2} className="shrink-0 opacity-70" />
     </Link>
   );
 }

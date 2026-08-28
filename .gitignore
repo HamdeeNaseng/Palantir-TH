@@ -46,3 +46,4 @@ client_secret_443986413848-n8st72rtmns3qrcgjevingpp8g2i7cff.apps.googleuserconte
 .agents/skills/*
 !.agents/skills/agent-commit/
 !.agents/skills/citizen-geo-report/
+.env.production

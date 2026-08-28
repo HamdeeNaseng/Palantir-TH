@@ -48,7 +48,7 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
   ];
 
   return (
-    <section className="panel panel-focus flex h-full min-h-0 flex-col">
+    <section className="panel panel-focus flex h-full max-h-[70vh] min-h-0 flex-col lg:max-h-none">
       <header className="flex shrink-0 items-center justify-between border-b border-[rgba(56,189,248,0.28)] px-3 py-1.5">
         <h3 className="panel-title flex items-center gap-2">
           <IconChartHistogram size={15} stroke={1.8} className="text-azure" />

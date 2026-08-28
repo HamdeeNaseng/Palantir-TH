@@ -52,7 +52,7 @@ export default async function ReportPage({
     <div className="flex min-h-screen flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
       <TopNav active={BASE_PATH} />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <CaseFilterSidebar
           initial={filters}
           facets={data.facets}
@@ -65,7 +65,7 @@ export default async function ReportPage({
           <ReportIntakeSection districtsByProvince={districtsByProvince} />
 
           <section className="panel shrink-0 overflow-visible">
-            <div className="flex items-center gap-3 px-3.5 py-2.5">
+            <div className="flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:gap-3">
               <div className="min-w-0">
                 <h1 className="panel-title whitespace-nowrap">รายงานจากประชาชน</h1>
                 <p className="num text-[10.5px] whitespace-nowrap text-ink-muted">

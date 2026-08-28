@@ -66,7 +66,9 @@ test.describe("ปักหมุดด้วย GPS", () => {
 
     // ตำบล arrives a beat later: its polygons are ~780 KB and are not fetched
     // until a pin exists, so this asserts the second phase actually lands.
-    await expect(page.getByText("ต.อาเนาะรู")).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByText("จ.ปัตตานี · อ.เมืองปัตตานี · ต.อาเนาะรู", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
 
     // The ตำบล the polygons give is the one the form submits — no text box.
     await expect(page.locator('input[name="subdistrict"]')).toHaveCount(0);
@@ -84,23 +86,24 @@ test.describe("ปักหมุดด้วย GPS", () => {
     await expect(page.getByText("อ.เมืองปัตตานี จ.ปัตตานี")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/จาก GPS ±/)).toBeVisible();
 
-    const marker = page.locator(".maplibregl-marker").first();
+    const marker = page.getByRole("button", { name: "Map marker" });
+    await marker.scrollIntoViewIfNeeded();
+    await marker.hover();
     const box = await marker.boundingBox();
     expect(box).not.toBeNull();
     if (!box) return;
 
     // ~130 m at the zoom the GPS fix leaves the map on: far enough to move the
     // pin, well short of leaving อ.เมืองปัตตานี.
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 20, { steps: 8 });
+    await page.mouse.move(box.x + box.width / 2 + 36, box.y + box.height / 2 + 20, { steps: 8 });
     await page.mouse.up();
 
     // Once a human has placed it, the device's error estimate no longer
     // describes the point, so it is dropped rather than carried forward.
+    await expect(page.locator('input[name="pinSource"]')).toHaveValue("manual");
     await expect(page.getByText("ปักเอง")).toBeVisible();
     await expect(page.getByText(/จาก GPS ±/)).toHaveCount(0);
-    await expect(page.locator('input[name="pinSource"]')).toHaveValue("manual");
     await expect(page.locator('input[name="pinAccuracy"]')).toHaveCount(0);
   });
 
@@ -134,24 +137,30 @@ test.describe("ไม่ได้รับสิทธิ์ตำแหน่�
 });
 
 test.describe("ภาพถ่ายดาวเทียม", () => {
-  test("ปิดอยู่ตั้งแต่แรก และไม่ยิงไทล์จนกว่าจะเปิด", async ({ page }) => {
+  test("เปิดอยู่ตั้งแต่แรก และปิดได้จากปุ่มสลับ", async ({ page }) => {
     const tileRequests: string[] = [];
-    // The whole point of shipping the layer hidden: a page view costs the
-    // third-party provider nothing until someone asks for it.
+    const transparentTile = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    // Imagery is intentionally the default because it gives the citizen
+    // recognizable ground context; keep the network behavior and toggle state
+    // aligned with that product decision. Fulfill with a local transparent
+    // tile: aborting a visible source can keep MapLibre from reaching `load`.
     await page.route("**://*.arcgisonline.com/**", (route) => {
       tileRequests.push(route.request().url());
-      return route.abort();
+      return route.fulfill({ status: 200, contentType: "image/png", body: transparentTile });
     });
     await page.route("**://api.maptiler.com/**", (route) => {
       tileRequests.push(route.request().url());
-      return route.abort();
+      return route.fulfill({ status: 200, contentType: "image/png", body: transparentTile });
     });
 
     await openIntakeForm(page);
-    await page.waitForTimeout(1500);
-    expect(tileRequests).toHaveLength(0);
-
-    await page.getByRole("button", { name: /^ดาวเทียม$/ }).click();
+    const toggle = page.getByRole("button", { name: /^ดาวเทียม$/ });
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => tileRequests.length, { timeout: 15_000 }).toBeGreaterThan(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
 });

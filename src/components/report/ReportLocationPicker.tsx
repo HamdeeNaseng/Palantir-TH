@@ -23,6 +23,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
+  SATELLITE_DEFAULT_ON,
   SATELLITE_SOURCE_ID,
   satelliteLayer,
   satelliteSource,
@@ -258,7 +259,7 @@ export default function ReportLocationPicker({
   const mapRef = useRef<MapRef | null>(null);
   const [pin, setPin] = useState<PickedPin | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [satellite, setSatellite] = useState(false);
+  const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   /**
    * The map instance arrives asynchronously — react-map-gl loads maplibre-gl
    * itself, then fetches three boundary files before anything can be
@@ -544,7 +545,7 @@ export default function ReportLocationPicker({
           `absolute inset-0`: maplibre-gl.css forces `position: relative` on
           its container, which cancels the insets and collapses the box to zero
           height with no error anywhere. */}
-      <div className="h-[280px] w-full">
+      <div className="h-[min(52vh,340px)] w-full sm:h-[280px]">
         <Map
           ref={mapRef}
           initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: 12 } }}

@@ -156,3 +156,288 @@
 .grecaptcha-badge {
   visibility: hidden;
 }
+
+/*
+ * ── Citizen intake controls ──────────────────────────────────────────────
+ *
+ * The rest of this app is an analyst console: 11–12 px type, ~30 px rows, a
+ * mouse. `/report` is the one surface a member of the public reaches, from a
+ * phone, once, often in a hurry — so its controls are sized for a thumb and
+ * scale *down* to the console at `sm`, rather than the console scaling up.
+ *
+ * Two numbers here are not stylistic:
+ *
+ *   - `font-size: 16px` on mobile. Below 16 px, iOS Safari zooms the page on
+ *     focus and does not zoom back out, which leaves the citizen editing a
+ *     form they now have to pan sideways to read.
+ *   - `min-height: 48px`. Touch targets under ~44 px are missed often enough
+ *     to matter on a form that is filed once and abandoned on failure.
+ */
+@layer components {
+  .cz-field {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    border-radius: 8px;
+    border: 1px solid rgba(37, 66, 102, 0.9);
+    background: #0a1524;
+    padding: 10px 12px;
+    font-size: 16px;
+    line-height: 1.45;
+    color: var(--color-ink);
+  }
+  .cz-field::placeholder {
+    color: var(--color-ink-muted);
+  }
+  .cz-field:focus-visible {
+    border-color: var(--color-azure);
+    outline: 2px solid rgba(56, 189, 248, 0.45);
+    outline-offset: 1px;
+  }
+  .cz-field:disabled {
+    opacity: 0.55;
+  }
+  /* A field the server rejected, marked without relying on colour alone —
+     every one of these also carries an icon + message underneath. */
+  .cz-field[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+
+  /* `appearance: none` is what lets the dark palette survive on iOS, but it
+     also removes the disclosure arrow — without drawing one back, a select is
+     indistinguishable from a text box. */
+  .cz-select {
+    appearance: none;
+    padding-inline-end: 38px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%239db2ce' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+  .cz-select:disabled {
+    background-image: none;
+  }
+
+  /* Buttons in the intake: same thumb rules as the fields. */
+  .cz-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+  }
+  .cz-btn:focus-visible {
+    outline: 2px solid var(--color-azure);
+    outline-offset: 2px;
+  }
+  .cz-btn:disabled {
+    opacity: 0.6;
+  }
+
+  .cz-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--color-ink-dim);
+  }
+
+  .cz-hint {
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--color-ink-muted);
+  }
+
+  /* From `sm` up there is a mouse and a wider viewport, so the intake rejoins
+     the console's density instead of towering over the panels beside it. */
+  @media (min-width: 640px) {
+    .cz-field {
+      min-height: 34px;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12.5px;
+    }
+    .cz-select {
+      padding-inline-end: 30px;
+      background-position: right 7px center;
+      background-size: 16px 16px;
+    }
+    .cz-btn {
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 6px;
+      font-size: 12.5px;
+    }
+    .cz-label {
+      margin-bottom: 4px;
+      font-size: 11.5px;
+    }
+    .cz-hint {
+      font-size: 10.5px;
+    }
+  }
+}
+
+/*
+ * ── Responsive foundations ───────────────────────────────────────────────
+ *
+ * The console pages were drawn for a 1180 px analyst screen. Below `lg` they
+ * stop being a fixed dashboard and become an ordinary scrolling document with
+ * an off-canvas filter drawer, so everything here exists to make that second
+ * mode behave on a phone.
+ */
+:root {
+  /* Height of the whole header, including the tab strip that wraps onto its
+     own row below `lg`. Floating notices are pinned against this rather than
+     a hard-coded 46 px that only ever matched the desktop bar. */
+  --nav-h: 84px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --nav-h: 76px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --nav-h: 38px;
+  }
+}
+
+@layer base {
+  html {
+    /* Landscape rotation on iOS otherwise inflates text in the dense panels,
+       which is precisely where there is no room for it. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* A touch screen has no hover to reveal a scrollbar and no pointer precise
+     enough to grab a 7 px one — it costs 7 px of a 360 px viewport for
+     nothing. Native touch overlay scrollbars stay. */
+  @media (pointer: coarse) {
+    *::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+    * {
+      scrollbar-width: none;
+    }
+  }
+}
+
+/* Horizontal strips (the mobile nav, a wide table) that scroll by touch and
+   must not spend vertical space on a bar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Bottom-anchored bars: keep clear of the iOS home indicator without adding
+   dead space on a device that has none. */
+@utility pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* `viewportFit: "cover"` lets the page paint under the notch, which also means
+   side padding has to be earned back in landscape. */
+@utility px-safe {
+  padding-left: max(0.5rem, env(safe-area-inset-left));
+  padding-right: max(0.5rem, env(safe-area-inset-right));
+}
+
+/*
+ * ── Filter sidebar rows ──────────────────────────────────────────────────
+ *
+ * The same markup is the analyst's 188 px sidebar at `lg` and a thumb-driven
+ * drawer below it, so the rows are sized for touch first and shrink back to
+ * console density once there is a mouse and a sidebar to sit in. This lives
+ * here rather than in three near-identical Tailwind strings across
+ * `FilterSidebar`, `EventsFilterSidebar`, and `CaseFilterSidebar`, which is
+ * how those three had already drifted apart.
+ */
+@layer components {
+  .filter-row {
+    display: flex;
+    cursor: pointer;
+    align-items: center;
+    gap: 10px;
+    padding-block: 8px;
+    font-size: 13.5px;
+    color: var(--color-ink-dim);
+  }
+  .filter-row:hover {
+    color: var(--color-ink);
+  }
+
+  .filter-box {
+    height: 20px;
+    width: 20px;
+    flex-shrink: 0;
+    appearance: none;
+    border-radius: 4px;
+    border: 1px solid rgba(90, 140, 190, 0.7);
+    background: transparent;
+  }
+  .filter-box:checked {
+    border-color: var(--color-azure);
+    background: var(--color-azure);
+  }
+  .filter-box:checked::after {
+    content: "✓";
+    display: block;
+    text-align: center;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 700;
+    color: #04070e;
+  }
+  .filter-box:focus-visible {
+    outline: 2px solid var(--color-azure);
+    outline-offset: 2px;
+  }
+
+  /* Option rows that are buttons rather than checkboxes (the range picker). */
+  .filter-option {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    text-align: left;
+    font-size: 13.5px;
+    color: var(--color-ink-dim);
+  }
+  .filter-option:hover {
+    background: rgba(56, 189, 248, 0.07);
+  }
+  .filter-option[aria-pressed="true"] {
+    background: rgba(56, 189, 248, 0.16);
+    color: var(--color-ink);
+  }
+
+  @media (min-width: 1024px) {
+    .filter-row {
+      gap: 8px;
+      padding-block: 3px;
+      font-size: 12px;
+    }
+    .filter-box {
+      height: 14px;
+      width: 14px;
+      border-radius: 3px;
+    }
+    .filter-box:checked::after {
+      font-size: 10px;
+      line-height: 13px;
+    }
+    .filter-option {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+  }
+}
