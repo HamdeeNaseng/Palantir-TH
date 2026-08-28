@@ -70,21 +70,50 @@ test("จุดเหตุการณ์ปิดอยู่ตั้งแ�
   await expect(dots).toBeChecked();
 });
 
-test("ไม่ยิงไทล์ดาวเทียมจนกว่าจะเปิด", async ({ page }) => {
+/**
+ * This used to assert the opposite — that `/map` fetched no imagery until the
+ * user opted in — which was right when `d5d0187` shipped the basemap as
+ * opt-in. `SATELLITE_DEFAULT_ON` has since been flipped to `true` on purpose
+ * (see the rationale in `src/lib/basemap.ts`: an อำเภอ outline cannot tell you
+ * whether a pin sits on a road or a plantation), and `report-pin.spec.ts` was
+ * updated to match while this one was not.
+ *
+ * It kept passing anyway, for the wrong reason: it checked the tile count
+ * 1,500 ms after load, and the map simply had not got that far yet. The moment
+ * the page rendered faster than that window, the assertion failed — a test
+ * that reported "imagery is off" when what it had measured was "the map has
+ * not loaded". So assert the contract that actually exists, in both
+ * directions.
+ *
+ * Tiles are fulfilled with a transparent PNG rather than aborted, for the
+ * reason `report-pin.spec.ts` gives: aborting a visible source can stop
+ * MapLibre from ever reaching `load`.
+ */
+test("ภาพถ่ายดาวเทียมเปิดอยู่ตั้งแต่แรก และปิดแล้วหยุดยิงไทล์", async ({ page }) => {
   const tiles: string[] = [];
-  await page.route("**://*.arcgisonline.com/**", (route) => {
+  const transparentTile = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const collect = (route: import("@playwright/test").Route) => {
     tiles.push(route.request().url());
-    return route.abort();
-  });
-  await page.route("**://api.maptiler.com/**", (route) => {
-    tiles.push(route.request().url());
-    return route.abort();
-  });
+    return route.fulfill({ status: 200, contentType: "image/png", body: transparentTile });
+  };
+  await page.route("**://*.arcgisonline.com/**", collect);
+  await page.route("**://api.maptiler.com/**", collect);
 
   await openMap(page);
-  await page.waitForTimeout(1500);
-  expect(tiles).toHaveLength(0);
 
-  await page.getByRole("checkbox", { name: /ภาพถ่ายดาวเทียม/ }).check();
+  // On by default: the imagery is fetched without anyone asking for it.
   await expect.poll(() => tiles.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const toggle = page.getByRole("checkbox", { name: /ภาพถ่ายดาวเทียม/ });
+  await expect(toggle).toBeChecked();
+
+  // And turning it off stops the traffic — which is the half of this that
+  // protects the third-party terms the default costs us.
+  await toggle.uncheck();
+  await page.waitForTimeout(1000);
+  const settled = tiles.length;
+  await page.waitForTimeout(2000);
+  expect(tiles.length, "no further imagery once the toggle is off").toBe(settled);
 });
