@@ -20,11 +20,22 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
+  IconRoute,
   IconSatellite,
   IconStack2,
 } from "@tabler/icons-react";
 import { EVENT_COLOR } from "@/lib/palette";
+import type { FlowLeg } from "@/lib/flow/types";
 import {
+  FLOW_CORRIDOR_LAYER,
+  FLOW_DIRECTION_LAYER,
+  FLOW_UNAVAILABLE_LABEL,
+  registerFlowArrowIcon,
+  toFlowFeatureCollection,
+} from "@/lib/flow/map-layers";
+import type { FlowUnavailableReason } from "@/lib/flow/use-flow-legs";
+import {
+  SATELLITE_DEFAULT_ON,
   SATELLITE_SOURCE_ID,
   satelliteLayer,
   satelliteSource,
@@ -403,6 +414,18 @@ interface MapPanelProps {
   timePath?: [number, number][];
   /** Statistically-significant district clusters — see `districtClusters`. */
   clusters?: MapCluster[];
+  /**
+   * Real road-network corridors — see `useFlowLegs`. Presence of
+   * `onFlowCorridorsEnabledChange` (not this) controls whether the toggle
+   * renders at all; this is just the data once it's enabled and resolved.
+   */
+  flowLegs?: FlowLeg[];
+  flowCorridorsEnabled?: boolean;
+  onFlowCorridorsEnabledChange?: (enabled: boolean) => void;
+  /** True once the server has said the routing engine can't serve this. */
+  flowUnavailable?: boolean;
+  /** Which failure it was, so the checkbox can explain itself. */
+  flowReason?: FlowUnavailableReason | null;
 }
 
 export default function MapPanel({
@@ -415,10 +438,15 @@ export default function MapPanel({
   onSelectFeature,
   timePath,
   clusters,
+  flowLegs,
+  flowCorridorsEnabled,
+  onFlowCorridorsEnabledChange,
+  flowUnavailable,
+  flowReason,
 }: MapPanelProps) {
   const mapRef = useRef<MapRef | null>(null);
   const [view, setView] = useState<View>("ไฮบริด");
-  const [satellite, setSatellite] = useState(false);
+  const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [layersOpen, setLayersOpen] = useState(false);
   const [ready, setReady] = useState(false);
   // Sticky: once the analyst has been in close, the files are cached anyway.
@@ -473,6 +501,8 @@ export default function MapPanel({
     [timePath],
   );
 
+  const flowLegsData = useMemo(() => toFlowFeatureCollection(flowLegs ?? []), [flowLegs]);
+
   const clusterData = useMemo(
     () => ({
       type: "FeatureCollection" as const,
@@ -520,33 +550,50 @@ export default function MapPanel({
     [onSelectFeature],
   );
 
-  const handleMouseMove = useCallback(
-    (e: MapLayerMouseEvent) => {
-      const f = e.features?.find((feature) => feature.layer.id === "events-point");
-      if (!f) {
-        // Only report the change once, on the way out — `mousemove` fires on
-        // every pixel and would otherwise call the parent back continuously.
-        setHover((prev) => {
-          if (prev) onHoverFeature?.(null);
-          return prev ? null : prev;
-        });
-        return;
-      }
-      const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number];
-      const props = f.properties as Record<string, string | number>;
-      setHover((prev) => {
-        if (prev?.props.id === props.id) return prev;
-        onHoverFeature?.(String(props.id));
-        return { lng, lat, props };
-      });
+  /**
+   * The last id handed to `onHoverFeature`.
+   *
+   * A ref rather than a read of `hover`, because `mousemove` fires on every
+   * pixel and the parent must be told only when the hovered identity actually
+   * changes. Deciding that *inside* a `setHover` updater — which is what this
+   * used to do — calls the parent's setState from within a function React may
+   * run mid-render, which is exactly the "Cannot update a component while
+   * rendering a different component" warning.
+   */
+  const reportedHoverRef = useRef<string | null>(null);
+
+  const reportHover = useCallback(
+    (id: string | null) => {
+      if (reportedHoverRef.current === id) return;
+      reportedHoverRef.current = id;
+      onHoverFeature?.(id);
     },
     [onHoverFeature],
   );
 
+  const handleMouseMove = useCallback(
+    (e: MapLayerMouseEvent) => {
+      const f = e.features?.find((feature) => feature.layer.id === "events-point");
+      if (!f) {
+        reportHover(null);
+        // Same value bails out of a re-render on React's own identity check.
+        setHover(null);
+        return;
+      }
+      const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+      const props = f.properties as Record<string, string | number>;
+      reportHover(String(props.id));
+      // Returning `prev` unchanged for the same dot keeps the popup from
+      // re-rendering on every pixel of movement across it.
+      setHover((prev) => (prev?.props.id === props.id ? prev : { lng, lat, props }));
+    },
+    [reportHover],
+  );
+
   const handleMouseLeave = useCallback(() => {
     setHover(null);
-    onHoverFeature?.(null);
-  }, [onHoverFeature]);
+    reportHover(null);
+  }, [reportHover]);
 
   const nudgeZoom = (d: number) =>
     mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 7) + d });
@@ -618,6 +665,7 @@ export default function MapPanel({
         onLoad={(e) => {
           setReady(true);
           setDetail(e.target.getZoom() >= DETAIL_MIN_ZOOM);
+          registerFlowArrowIcon(e.target);
         }}
         onZoomEnd={(e) => setDetail((on) => on || e.viewState.zoom >= DETAIL_MIN_ZOOM)}
         onClick={handleClick}
@@ -673,6 +721,12 @@ export default function MapPanel({
           <Source id="clusters" type="geojson" data={clusterData}>
             <Layer {...CLUSTER_GLOW_LAYER} />
             <Layer {...CLUSTER_RING_LAYER} />
+          </Source>
+        )}
+        {flowCorridorsEnabled && flowLegs !== undefined && (
+          <Source id="flow-legs" type="geojson" data={flowLegsData}>
+            <Layer {...FLOW_CORRIDOR_LAYER} />
+            <Layer {...FLOW_DIRECTION_LAYER} />
           </Source>
         )}
 
@@ -778,6 +832,36 @@ export default function MapPanel({
                   </span>
                 </span>
               </label>
+
+              {onFlowCorridorsEnabledChange && (
+                <label
+                  className={
+                    flowUnavailable
+                      ? "mt-2 flex cursor-not-allowed items-start gap-2 text-[11.5px] text-ink-muted/60"
+                      : "mt-2 flex cursor-pointer items-start gap-2 text-[11.5px] text-ink-dim hover:text-ink"
+                  }
+                  title={flowReason ? FLOW_UNAVAILABLE_LABEL[flowReason] : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(flowCorridorsEnabled) && !flowUnavailable}
+                    disabled={flowUnavailable}
+                    onChange={() => onFlowCorridorsEnabledChange(!flowCorridorsEnabled)}
+                    className="mt-[2px] h-3.5 w-3.5 shrink-0 appearance-none rounded-[3px] border border-[rgba(90,140,190,0.7)] bg-transparent checked:border-azure checked:bg-azure checked:after:block checked:after:text-[10px] checked:after:leading-[13px] checked:after:font-bold checked:after:text-[#04070e] checked:after:content-['✓'] disabled:opacity-40"
+                  />
+                  <span>
+                    <span className="flex items-center gap-1.5 text-ink">
+                      <IconRoute size={13} stroke={1.7} />
+                      เส้นทางตามถนนจริง
+                    </span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
+                      {flowReason
+                        ? FLOW_UNAVAILABLE_LABEL[flowReason]
+                        : "คำนวณเส้นทางบนโครงข่ายถนนจริงจากข้อมูล OSM (ทดลอง)"}
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
           )}
         </div>

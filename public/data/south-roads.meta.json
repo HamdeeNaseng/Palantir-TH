@@ -1,0 +1,27 @@
+{
+  "layer": "south-roads",
+  "owner": "OpenStreetMap contributors",
+  "licence": "ODbL 1.0 — https://www.openstreetmap.org/copyright",
+  "published_via": "Overpass API",
+  "access_method": "Overpass QL (POST)",
+  "source_url": "https://overpass-api.de/api/interpreter",
+  "query": "[out:json][timeout:600];\n(\n  way[\"highway\"~\"^(motorway|trunk|primary|secondary|tertiary)(_link)?$\"](5.5,99.9,8.1,102.3);\n);\n(._;>;);\nout body;",
+  "osm_data_timestamp": "2026-08-28T04:08:36Z",
+  "fetched_at": "2026-08-28T04:10:02.894Z",
+  "crs": "EPSG:4326",
+  "encoding": "UTF-8",
+  "geometry": "routing graph (node array + directed edge tuples)",
+  "highway_classes": [
+    "motorway",
+    "trunk",
+    "primary",
+    "secondary",
+    "tertiary"
+  ],
+  "node_count": 119356,
+  "directed_edge_count": 215188,
+  "ways_returned": 23972,
+  "ways_fully_outside": 16674,
+  "clipped_against": "public/data/south-districts.geojson",
+  "notes": "โครงข่ายถนนสายหลัก (motorway–tertiary) เท่านั้น ไม่รวมถนนในหมู่บ้าน/ซอย ใช้สำหรับคำนวณเส้นทางระหว่างเหตุการณ์ ไม่ใช่การนำทางแบบเลี้ยวต่อเลี้ยว การเผยแพร่ซ้ำต้องให้เครดิต OpenStreetMap ตามเงื่อนไข ODbL"
+}
