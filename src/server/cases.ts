@@ -1,7 +1,9 @@
 import type { Filter, Sort } from "mongodb";
+import { effectiveEvent, type EffectiveEvent } from "@/lib/case-correction";
 import { COLLECTIONS, getDb } from "@/lib/mongodb";
 import { EVENT_TYPE_LABEL, SEVERITY_LABEL, VERIFICATION_LABEL } from "@/lib/labels";
 import { PROVINCE_BY_CODE } from "@/lib/geo";
+import { loadDistricts, loadSubdistricts, representativePoint } from "@/lib/geography";
 import { EVENT_COLOR } from "@/lib/palette";
 import {
   BANGKOK_OFFSET,
@@ -10,7 +12,9 @@ import {
   type CaseSortKey,
 } from "@/lib/case-filters";
 import type {
+  CaseCorrectionDoc,
   EventCandidateDoc,
+  GeoPrecision,
   EventType,
   IngestionRunDoc,
   ProvinceCode,
@@ -477,7 +481,26 @@ export interface RawField {
 }
 
 export interface CaseDetail {
+  /** Exactly what the source reported — never overwritten by a correction. */
   event: EventCandidateDoc;
+  /** The same case with analyst corrections applied, plus per-field provenance. */
+  effective: EffectiveEvent;
+  /**
+   * Where to frame the map for a case that has no coordinates at all — 186 of
+   * them carry an address but no point.
+   *
+   * Deliberately NOT a pin and never rendered as one: it is the ตำบล or อำเภอ
+   * this case is filed under, supplied only so the edit map opens somewhere
+   * useful instead of over the Gulf. Drawing it as a location would be the
+   * exact "centroid that looks like a GPS fix" this app warns about
+   * everywhere else.
+   */
+  locationFallback: {
+    centre: [number, number];
+    label: string;
+    /** Which administrative level the estimate came from — sizes the uncertainty ring. */
+    precision: Extract<GeoPrecision, "subdistrict" | "district">;
+  } | null;
   /** The source that produced the record, from source_registry. */
   source: SourceRegistryDoc | null;
   /** Every source that reported this same candidate, the first one included. */
@@ -499,6 +522,55 @@ export interface CaseDetail {
   run: IngestionRunDoc | null;
   /** Other records in the same district, nearest in time first. */
   nearby: CaseRow[];
+}
+
+/**
+ * The finest administrative unit this case names, as a point to frame a map on.
+ *
+ * Matched by name against the DDPM polygons, narrowed to the case's own
+ * province first — ตำบล names repeat across the four provinces, and a bare
+ * name match would happily return one 200 km away. Returns `null` rather than
+ * guessing when nothing matches, because a wrong frame is worse than no map:
+ * it would show the analyst a district that is not the one on the page.
+ *
+ * `representativePoint` (not a vertex average) because several coastal อำเภอ
+ * here are crescent-shaped and their arithmetic centroid falls in the sea.
+ */
+function administrativeCentre(
+  event: EventCandidateDoc,
+): CaseDetail["locationFallback"] {
+  const province = PROVINCE_BY_CODE.get(event.location.provinceCode);
+  if (!province) return null;
+
+  const wanted = event.location.subdistrict?.trim();
+  if (wanted) {
+    const sub = loadSubdistricts().find(
+      (s) => s.provinceCode === province.ddpmCode && s.nameTh === wanted,
+    );
+    if (sub) {
+      return {
+        centre: representativePoint(sub.geometry),
+        label: `ต.${sub.nameTh}`,
+        precision: "subdistrict",
+      };
+    }
+  }
+
+  const districtName = event.location.district?.trim();
+  const district = districtName
+    ? loadDistricts().find(
+        (d) => d.provinceCode === province.ddpmCode && d.nameTh === districtName,
+      )
+    : undefined;
+  if (district) {
+    return {
+      centre: representativePoint(district.geometry),
+      label: `อ.${district.nameTh}`,
+      precision: "district",
+    };
+  }
+
+  return null;
 }
 
 /** Long values are cut for display only; the archive keeps the full payload. */
@@ -548,7 +620,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
     if (!event) return null;
 
     const span = NEARBY_DAYS * 86400000;
-    const [rawDoc, registry, run, nearbyDocs] = await Promise.all([
+    const [rawDoc, registry, run, nearbyDocs, corrections] = await Promise.all([
       db.collection<RawRecordDoc>(COLLECTIONS.rawRecords).findOne({ _id: event.raw_record_id }),
       db.collection<SourceRegistryDoc>(COLLECTIONS.sourceRegistry).find({}).toArray(),
       db.collection<IngestionRunDoc>(COLLECTIONS.ingestionRuns).findOne({
@@ -567,6 +639,10 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
         })
         .limit(NEARBY_SCAN_LIMIT)
         .toArray(),
+      db
+        .collection<CaseCorrectionDoc>(COLLECTIONS.caseCorrections)
+        .find({ event_id: id })
+        .toArray(),
     ]);
 
     const byId = new Map(registry.map((s) => [s._id, s]));
@@ -574,8 +650,15 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
 
     const flat = rawDoc ? flattenRaw(rawDoc.raw) : { fields: [], body: null };
 
+    const effective = effectiveEvent(event, corrections);
+
     return {
+      locationFallback: effective.event.location.geo ? null : administrativeCentre(event),
+      // `event` stays the source's claim — every "ข้อเท็จจริงที่แหล่งข้อมูล
+      // รายงาน" field reads from it, and corrections travel alongside rather
+      // than replacing it.
       event,
+      effective,
       source: byId.get(event.source_id) ?? null,
       corroborating: event.corroborating_sources
         .map((sid) => byId.get(sid))
