@@ -17,11 +17,22 @@ import {
   IconMap2,
   IconMinus,
   IconPlus,
+  IconRoute,
   IconSatellite,
 } from "@tabler/icons-react";
 import { AREA_DENSITY_SCALE } from "@/lib/palette";
+import { scopedWindow } from "@/lib/events-replay";
+import { useFlowLegs } from "@/lib/flow/use-flow-legs";
+import {
+  FLOW_CORRIDOR_LAYER,
+  FLOW_DIRECTION_LAYER,
+  FLOW_UNAVAILABLE_LABEL,
+  registerFlowArrowIcon,
+  toFlowFeatureCollection,
+} from "@/lib/flow/map-layers";
 import {
   SATELLITE_SOURCE_ID,
+  SATELLITE_DEFAULT_ON,
   satelliteLayer,
   satelliteSource,
   setSatelliteBasemap,
@@ -205,7 +216,8 @@ export default function MapWorkspace({
   const [manualLevel, setManualLevel] = useState<AreaLevel | "auto">("auto");
   const [showAreas, setShowAreas] = useState(true);
   const [showDots, setShowDots] = useState(false);
-  const [satellite, setSatellite] = useState(false);
+  const [showFlowCorridors, setShowFlowCorridors] = useState(false);
+  const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<AreaPopup | null>(null);
   const [events, setEvents] = useState<EventFeatureCollection | null>(null);
@@ -214,12 +226,14 @@ export default function MapWorkspace({
   const mapStyle = useMemo(() => baseStyle(), []);
 
   /**
-   * Points are fetched the first time the dot layer is switched on, never
-   * before — see `getMapEvents`. Kept afterwards, so toggling the layer back
-   * and forth costs one request, not one per flip.
+   * Points are fetched the first time a layer that needs them is switched on,
+   * never before — see `getMapEvents`. Kept afterwards, so toggling either
+   * layer back and forth costs one request, not one per flip; the corridor
+   * layer reads the same fetched set as the dots and neither waits on the
+   * other.
    */
   useEffect(() => {
-    if (!showDots || events) return;
+    if ((!showDots && !showFlowCorridors) || events) return;
     const controller = new AbortController();
     fetch(`/api/map/events?${eventsQuery}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -229,7 +243,29 @@ export default function MapWorkspace({
         setEventsError(true);
       });
     return () => controller.abort();
-  }, [showDots, events, eventsQuery]);
+  }, [showDots, showFlowCorridors, events, eventsQuery]);
+
+  /**
+   * The most recent events in the filtered set, chronologically — the same
+   * "recent movement" window `/events` draws, anchored to the latest matched
+   * event rather than to a playhead, because this page has no scrubber. The
+   * fetched collection is not guaranteed sorted, and `scopedWindow`'s binary
+   * search requires it.
+   */
+  const flowWindow = useMemo(() => {
+    if (!showFlowCorridors || !events) return [];
+    const sorted = [...events.features].sort((a, b) => a.properties.ts - b.properties.ts);
+    const latest = sorted.at(-1);
+    return latest ? scopedWindow(sorted, latest.properties.ts) : [];
+  }, [showFlowCorridors, events]);
+
+  const {
+    legs: flowLegs,
+    unavailable: flowUnavailable,
+    reason: flowReason,
+  } = useFlowLegs(flowWindow, showFlowCorridors);
+
+  const flowLegsData = useMemo(() => toFlowFeatureCollection(flowLegs), [flowLegs]);
 
   const level: AreaLevel =
     manualLevel === "auto"
@@ -333,6 +369,10 @@ export default function MapWorkspace({
         onLoad={(e) => {
           setReady(true);
           setZoom(e.target.getZoom());
+          // The style declares the land fills at their plain opacity; with
+          // imagery on from the start they have to be re-balanced once.
+          setSatelliteBasemap(e.target, satellite, SATELLITE_FILLS);
+          registerFlowArrowIcon(e.target);
         }}
         onZoomEnd={(e) => setZoom(e.viewState.zoom)}
         onClick={handleClick}
@@ -369,6 +409,13 @@ export default function MapWorkspace({
                 "circle-stroke-width": 0.4,
               }}
             />
+          </Source>
+        )}
+
+        {showFlowCorridors && (
+          <Source id="flow-legs" type="geojson" data={flowLegsData}>
+            <Layer {...FLOW_CORRIDOR_LAYER} />
+            <Layer {...FLOW_DIRECTION_LAYER} />
           </Source>
         )}
 
@@ -432,6 +479,18 @@ export default function MapWorkspace({
                 : eventsError
                   ? "จุดเหตุการณ์ (โหลดไม่สำเร็จ)"
                   : "จุดเหตุการณ์"
+            }
+          />
+          <Toggle
+            checked={showFlowCorridors && !flowUnavailable}
+            onChange={() => setShowFlowCorridors((v) => !v)}
+            label="เส้นทางตามถนนจริง (ล่าสุด)"
+            icon={<IconRoute size={12} stroke={1.7} />}
+            disabled={flowUnavailable}
+            title={
+              flowReason
+                ? FLOW_UNAVAILABLE_LABEL[flowReason]
+                : "เส้นทางบนโครงข่ายถนนจริงระหว่างเหตุการณ์ล่าสุด (ทดลอง)"
             }
           />
           <Toggle
@@ -600,15 +659,18 @@ function Toggle({
   label,
   icon,
   disabled,
+  title,
 }: {
   checked: boolean;
   onChange: () => void;
   label: string;
   icon?: React.ReactNode;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <label
+      title={title}
       className={`flex items-center gap-2 py-[3px] text-[11px] ${
         disabled ? "text-ink-muted opacity-60" : "cursor-pointer text-ink-dim hover:text-ink"
       }`}

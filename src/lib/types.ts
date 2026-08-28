@@ -328,6 +328,69 @@ export interface CaseDoc {
   updates: { at: Date; text: string; tag: "urgent" | "connected" | "new" }[];
 }
 
+/**
+ * `case_corrections` — what an analyst says the source got wrong.
+ *
+ * A separate document rather than an edit to `event_candidates`, for the same
+ * reason `report-intake.ts` never edits a prior submission: the candidate is a
+ * record of *what the source reported*, and the panel built on it is titled
+ * accordingly. Overwriting it would quietly turn "แหล่งข้อมูลรายงานว่า" into
+ * "someone typed", and there would be no way left to tell which one a given
+ * value was.
+ *
+ * Append-only, like every other layer here. Correcting a correction means
+ * writing another one; `effectiveEvent()` resolves the stack by taking the
+ * newest value per field. Nothing is ever destroyed, so a wrong correction is
+ * recoverable rather than fatal — which matters more than usual given this
+ * app has no authentication to decide who may write one.
+ */
+export interface CaseCorrectionDoc {
+  _id: string;
+  /** The `event_candidates._id` this corrects. */
+  event_id: string;
+  corrected_at: Date;
+  /**
+   * Who claims to have made it. Free text and unverified — with no auth this
+   * is an assertion about authorship, never evidence of it.
+   */
+  corrected_by: string | null;
+  /** Why the source's value is believed wrong. The reason is the point. */
+  note: string | null;
+  /** Only the fields this correction actually changes. */
+  changes: CaseCorrectionChanges;
+}
+
+/**
+ * Every field an analyst may correct. Deliberately a small set: these are the
+ * values that change what a case *means* on the map and in the register.
+ * Anything absent is a field no correction can reach.
+ *
+ * `null` is a meaningful value here, not "unset" — it is how an analyst says
+ * "the source's number is wrong and the truth is unknown", which is different
+ * from leaving the source's number alone.
+ */
+export interface CaseCorrectionChanges {
+  /** Where it actually happened — set by dragging the pin. */
+  geo?: { coordinates: [number, number]; precision: GeoPrecision };
+  event_type?: EventType;
+  severity?: SeverityLevel | null;
+  verification?: VerificationStatus;
+  killed?: number | null;
+  injured?: number | null;
+  summary?: string | null;
+}
+
+/** The correctable field names, for iterating without hand-listing them twice. */
+export const CORRECTABLE_FIELDS = [
+  "geo",
+  "event_type",
+  "severity",
+  "verification",
+  "killed",
+  "injured",
+  "summary",
+] as const satisfies readonly (keyof CaseCorrectionChanges)[];
+
 /** Unofficial / citizen-sourced report — the lower-trust signal stream. */
 export interface CitizenReportDoc {
   _id: string;

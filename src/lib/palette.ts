@@ -1,4 +1,5 @@
 import type { EventFamily, EventType, VerificationStatus } from "./types";
+import type { FeasibilityBand } from "./flow/types";
 
 /**
  * One colour per event type, shared by the map, legend, chips and tables.
@@ -81,4 +82,17 @@ export const VERIFICATION_COLOR: Record<VerificationStatus, string> = {
   verified: "#22c55e",
   under_review: "#f59e0b",
   unverifiable: "#64809f",
+};
+
+/**
+ * Implied travel speed feasibility for a road-network corridor leg on
+ * `/events`. Green-to-red like `SEVERITY_COLOR`, because both read the same
+ * way: further right is more concerning, never a different kind of thing.
+ */
+export const FEASIBILITY_COLOR: Record<FeasibilityBand, string> = {
+  highly_plausible: "#22c55e",
+  likely: "#84cc16",
+  possible: "#f59e0b",
+  very_unlikely: "#f97316",
+  impossible: "#ef4444",
 };

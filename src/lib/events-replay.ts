@@ -42,16 +42,16 @@ export const PATH_WINDOW_MS = 90 * 86400000;
 export const PATH_MAX_POINTS = 20;
 
 /**
- * A short, legible "recent movement" line — the mockup's เส้นทางเวลา, scoped
- * down from "every matched event ever" (which would be an unreadable tangle
- * across 24 years of real data) to the last `PATH_MAX_POINTS` events within
- * `PATH_WINDOW_MS` of the playhead. Hidden entirely below 2 points: a
- * one-point "path" isn't a path, it's a single dot pretending to be a line.
+ * The events behind the "recent movement" line — the mockup's เส้นทางเวลา,
+ * scoped down from "every matched event ever" (which would be an unreadable
+ * tangle across 24 years of real data) to the last `PATH_MAX_POINTS` events
+ * within `PATH_WINDOW_MS` of the playhead, chronological order. Empty below 2
+ * points: a one-point "path" isn't a path, it's a single dot pretending to be
+ * a line. Shared by `scopedTimePath` (the straight-line rendering) and the
+ * road-network flow-corridor layer, which needs the full features — not just
+ * coordinates — to pair up event ids.
  */
-export function scopedTimePath(
-  features: EventFeature[],
-  currentTimestampMs: number,
-): [number, number][] {
+export function scopedWindow(features: EventFeature[], currentTimestampMs: number): EventFeature[] {
   const idx = lastIndexAtOrBefore(features, currentTimestampMs);
   if (idx < 0) return [];
 
@@ -65,7 +65,15 @@ export function scopedTimePath(
 
   // `candidates` was collected walking backward from the playhead; the path
   // should be drawn in chronological order.
-  return candidates.reverse().map((f) => f.geometry.coordinates);
+  return candidates.reverse();
+}
+
+/** Straight-line coordinates through `scopedWindow` — the always-on, zero-cost fallback. */
+export function scopedTimePath(
+  features: EventFeature[],
+  currentTimestampMs: number,
+): [number, number][] {
+  return scopedWindow(features, currentTimestampMs).map((f) => f.geometry.coordinates);
 }
 
 export interface DistrictCluster {

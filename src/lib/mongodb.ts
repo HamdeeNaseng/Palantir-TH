@@ -80,4 +80,6 @@ export const COLLECTIONS = {
   processingLogs: "processing_logs",
   cases: "cases",
   citizenReports: "citizen_reports",
+  /** Analyst corrections layered over event_candidates — never edits to them. */
+  caseCorrections: "case_corrections",
 } as const;
