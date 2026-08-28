@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { IconCalendar, IconChevronDown, IconFilter, IconLoader2 } from "@tabler/icons-react";
+import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
+import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
 import { EVENT_COLOR } from "@/lib/palette";
 import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
@@ -70,12 +71,12 @@ function Check({
   label: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 py-[3px] text-[12px] text-ink-dim hover:text-ink">
+    <label className="filter-row">
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="h-3.5 w-3.5 shrink-0 appearance-none rounded-[3px] border border-[rgba(90,140,190,0.7)] bg-transparent checked:border-azure checked:bg-azure checked:after:block checked:after:text-[10px] checked:after:leading-[13px] checked:after:font-bold checked:after:text-[#04070e] checked:after:content-['✓']"
+        className="filter-box"
       />
       {label}
     </label>
@@ -98,20 +99,25 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
     startTransition(() => router.push("/investigate", { scroll: false }));
   };
 
-  return (
-    <aside className="flex w-[188px] shrink-0 flex-col border-r border-[rgba(37,66,102,0.55)] bg-[#070e1b]">
-      <div className="flex items-center justify-between border-b border-[rgba(37,66,102,0.55)] px-3.5 py-2.5">
-        <h2 className="text-[13px] font-semibold text-ink">ตัวกรอง</h2>
-        <button
-          type="button"
-          onClick={reset}
-          className="rounded border border-[rgba(56,100,150,0.5)] px-1.5 py-0.5 text-[10.5px] text-ink-muted hover:text-ink"
-        >
-          ล้างตัวกรอง
-        </button>
-      </div>
+  // What the closed drawer reports on a phone: how far this view has been
+  // narrowed away from the defaults, not how many boxes happen to be ticked.
+  const activeCount =
+    (f.range !== DEFAULT_FILTERS.range ? 1 : 0) +
+    (f.provinces.length !== DEFAULT_FILTERS.provinces.length ? 1 : 0) +
+    f.eventTypes.length +
+    (f.verification.length !== DEFAULT_FILTERS.verification.length ? 1 : 0) +
+    (f.sourceId !== DEFAULT_FILTERS.sourceId ? 1 : 0) +
+    (f.trustedOnly !== DEFAULT_FILTERS.trustedOnly ? 1 : 0);
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+  return (
+    <FilterShell
+      title="ตัวกรอง"
+      resetLabel="ล้างตัวกรอง"
+      onReset={reset}
+      onApply={apply}
+      pending={pending}
+      activeCount={activeCount}
+    >
         <Section title="ช่วงเวลา">
           <div className="overflow-hidden rounded border border-[rgba(37,66,102,0.6)]">
             {RANGE_OPTIONS.map((opt) => (
@@ -119,11 +125,8 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
                 key={opt.value}
                 type="button"
                 onClick={() => patch({ range: opt.value })}
-                className={
-                  opt.value === f.range
-                    ? "block w-full bg-[rgba(56,189,248,0.16)] px-2.5 py-1.5 text-left text-[12px] text-ink"
-                    : "block w-full px-2.5 py-1.5 text-left text-[12px] text-ink-dim hover:bg-[rgba(56,189,248,0.07)]"
-                }
+                aria-pressed={opt.value === f.range}
+                className="filter-option"
               >
                 {opt.label}
               </button>
@@ -186,7 +189,7 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
                         key={t}
                         type="button"
                         onClick={() => patch({ eventTypes: toggle<EventType>(f.eventTypes, t) })}
-                        className="chip"
+                        className="chip min-h-9 px-3 text-[12.5px] lg:min-h-0 lg:px-2 lg:text-[11px]"
                         style={{
                           color,
                           borderColor: on ? color : `${color}55`,
@@ -221,7 +224,7 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
             <select
               value={f.sourceId}
               onChange={(e) => patch({ sourceId: e.target.value })}
-              className="w-full appearance-none rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2.5 py-1.5 text-[12px] text-ink-dim focus:border-azure focus:outline-none"
+              className="min-h-11 w-full appearance-none rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2.5 py-1.5 text-[16px] text-ink-dim focus:border-azure focus:outline-none lg:min-h-0 lg:text-[12px]"
             >
               <option value="all">ทั้งหมด</option>
               <option value="src_dsi_wcid">DSI-WCID</option>
@@ -239,7 +242,7 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
             />
           </div>
 
-          <label className="mt-3 flex cursor-pointer items-center justify-between gap-2 text-[11.5px] text-ink-dim">
+          <label className="filter-row mt-3 justify-between">
             เฉพาะแหล่งข้อมูลที่เชื่อถือได้
             <input
               type="checkbox"
@@ -250,23 +253,6 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
             <span className="relative h-4 w-8 shrink-0 rounded-full bg-[rgba(56,100,150,0.4)] transition-colors peer-checked:bg-azure after:absolute after:top-0.5 after:left-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
           </label>
         </Section>
-      </div>
-
-      <div className="border-t border-[rgba(37,66,102,0.55)] p-3">
-        <button
-          type="button"
-          onClick={apply}
-          disabled={pending}
-          className="flex w-full items-center justify-center gap-2 rounded bg-[#1d4ed8] py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-[#2563eb] disabled:opacity-70"
-        >
-          {pending ? (
-            <IconLoader2 size={14} stroke={2} className="animate-spin" />
-          ) : (
-            <IconFilter size={14} stroke={1.8} />
-          )}
-          ใช้ตัวกรอง
-        </button>
-      </div>
-    </aside>
+    </FilterShell>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { IconChevronDown, IconFilter, IconLoader2 } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
+import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCE_BY_CODE } from "@/lib/geo";
 import {
   DEFAULT_CASE_FILTERS,
@@ -66,13 +67,13 @@ function Check({
   return (
     <label
       title={title ?? label}
-      className="flex cursor-pointer items-center gap-2 py-[3px] text-[12px] text-ink-dim hover:text-ink"
+      className="filter-row"
     >
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="h-3.5 w-3.5 shrink-0 appearance-none rounded-[3px] border border-[rgba(90,140,190,0.7)] bg-transparent checked:border-azure checked:bg-azure checked:after:block checked:after:text-[10px] checked:after:leading-[13px] checked:after:font-bold checked:after:text-[#04070e] checked:after:content-['✓']"
+        className="filter-box"
       />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {count !== undefined && (
@@ -145,20 +146,29 @@ export default function CaseFilterSidebar({
       ? facets.districts
       : facets.districts.filter((d) => d.province === "" || selectedNames.has(d.province));
 
-  return (
-    <aside className="hidden w-[212px] shrink-0 flex-col border-r border-[rgba(37,66,102,0.55)] bg-[#070e1b] lg:flex">
-      <div className="flex items-center justify-between border-b border-[rgba(37,66,102,0.55)] px-3.5 py-2.5">
-        <h2 className="text-[13px] font-semibold text-ink">ตัวกรองเคส</h2>
-        <button
-          type="button"
-          onClick={reset}
-          className="rounded border border-[rgba(56,100,150,0.5)] px-1.5 py-0.5 text-[10.5px] text-ink-muted hover:text-ink"
-        >
-          ล้างทั้งหมด
-        </button>
-      </div>
+  // Counted the way the chip row counts, so the badge on the closed drawer and
+  // the removable chips above the table always agree.
+  const activeCount =
+    (f.q ? 1 : 0) +
+    (f.from || f.to ? 1 : 0) +
+    f.provinces.length +
+    f.districts.length +
+    f.eventTypes.length +
+    f.verification.length +
+    f.placeTypes.length +
+    (!hideSourceFilter && f.sourceId !== DEFAULT_CASE_FILTERS.sourceId ? 1 : 0) +
+    (f.hasMedia ? 1 : 0);
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+  return (
+    <FilterShell
+      title="ตัวกรองเคส"
+      resetLabel="ล้างทั้งหมด"
+      onReset={reset}
+      onApply={apply}
+      pending={pending}
+      activeCount={activeCount}
+      width="lg:w-[212px]"
+    >
         <Section
           title="ช่วงวันที่เกิดเหตุ"
           action={
@@ -176,7 +186,7 @@ export default function CaseFilterSidebar({
                 min={span?.from}
                 max={span?.to}
                 onChange={(e) => patch({ from: e.target.value })}
-                className="num min-w-0 flex-1 rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2 py-1 text-[11.5px] text-ink focus:border-azure focus:outline-none"
+                className="num min-h-11 min-w-0 flex-1 rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2 py-1 text-[16px] text-ink focus:border-azure focus:outline-none lg:min-h-0 lg:text-[11.5px]"
               />
             </label>
             <label className="flex items-center gap-2 text-[11px] text-ink-muted">
@@ -187,7 +197,7 @@ export default function CaseFilterSidebar({
                 min={span?.from}
                 max={span?.to}
                 onChange={(e) => patch({ to: e.target.value })}
-                className="num min-w-0 flex-1 rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2 py-1 text-[11.5px] text-ink focus:border-azure focus:outline-none"
+                className="num min-h-11 min-w-0 flex-1 rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2 py-1 text-[16px] text-ink focus:border-azure focus:outline-none lg:min-h-0 lg:text-[11.5px]"
               />
             </label>
           </div>
@@ -327,7 +337,7 @@ export default function CaseFilterSidebar({
             </div>
           )}
 
-          <label className="flex cursor-pointer items-center justify-between gap-2 text-[11.5px] text-ink-dim">
+          <label className="filter-row justify-between">
             <span>
               เฉพาะที่มีหลักฐานแนบ
               <span className="num ml-1 text-[10.5px] text-ink-muted">
@@ -343,23 +353,6 @@ export default function CaseFilterSidebar({
             <span className="relative h-4 w-8 shrink-0 rounded-full bg-[rgba(56,100,150,0.4)] transition-colors after:absolute after:top-0.5 after:left-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:transition-transform peer-checked:bg-azure peer-checked:after:translate-x-4" />
           </label>
         </Section>
-      </div>
-
-      <div className="border-t border-[rgba(37,66,102,0.55)] p-3">
-        <button
-          type="button"
-          onClick={apply}
-          disabled={pending}
-          className="flex w-full items-center justify-center gap-2 rounded bg-[#1d4ed8] py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-[#2563eb] disabled:opacity-70"
-        >
-          {pending ? (
-            <IconLoader2 size={14} stroke={2} className="animate-spin" />
-          ) : (
-            <IconFilter size={14} stroke={1.8} />
-          )}
-          ใช้ตัวกรอง
-        </button>
-      </div>
-    </aside>
+    </FilterShell>
   );
 }

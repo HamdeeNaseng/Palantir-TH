@@ -109,10 +109,10 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
   const precisionM = GEO_PRECISION_RADIUS_M[precision];
 
   return (
-    <div className="flex h-screen min-w-[1180px] flex-col overflow-hidden">
+    <div className="flex min-h-dvh flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
       <TopNav active={back.nav} />
 
-      <main className="min-h-0 flex-1 overflow-auto bg-abyss p-2">
+      <main className="min-h-0 flex-1 bg-abyss p-2 lg:overflow-auto">
         {/* ---------------------------------------------------------- header */}
         <header className="panel mb-2 px-4 py-3">
           <nav className="mb-2 flex items-center gap-1 text-[11px] text-ink-muted">
@@ -127,7 +127,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
             <span className="font-mono">{e._id}</span>
           </nav>
 
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <h1 className="text-[17px] leading-snug font-semibold text-ink">{e.event.title}</h1>
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-dim">
@@ -140,7 +140,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
               </p>
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
               <span
                 className="chip"
                 style={{
@@ -165,10 +165,10 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
         </header>
 
         {/* ----------------------------------------------------------- body */}
-        <div className="grid grid-cols-[minmax(0,1fr)_clamp(300px,26vw,360px)] gap-2">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_clamp(300px,26vw,360px)]">
           <div className="flex min-w-0 flex-col gap-2">
             <Panel title="ข้อเท็จจริงที่แหล่งข้อมูลรายงาน">
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-0 px-4 py-1">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-0 px-4 py-1 sm:grid-cols-2">
                 <Fact label="เวลาเกิดเหตุ" value={formatByPrecision(e.time.start, e.time.precision)}>
                   {e.time.precision === "day" &&
                     "แหล่งข้อมูลระบุเป็นระดับวัน ไม่ได้ระบุเวลาในวันนั้น"}
@@ -236,7 +236,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
 
             {e.media.length > 0 && (
               <Panel title={`หลักฐานที่แนบมากับรายงาน (${e.media.length})`}>
-                <div className="grid grid-cols-4 gap-2 p-3">
+                <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
                   {e.media.map((m) => (
                     <MediaThumb key={`${m.field}-${m.url}`} item={m} />
                   ))}
@@ -339,7 +339,7 @@ function KeyValueTable({ rows }: { rows: { key: string; value: string; note?: st
           <tr key={r.key} className="border-t border-[rgba(37,66,102,0.3)]">
             <th
               scope="row"
-              className="w-[210px] px-4 py-1.5 text-left align-top font-mono text-[11px] font-normal break-all text-ink-muted"
+              className="w-[120px] px-4 py-1.5 text-left align-top font-mono text-[11px] font-normal break-all text-ink-muted sm:w-[210px]"
             >
               {r.key}
             </th>

@@ -281,3 +281,163 @@
     }
   }
 }
+
+/*
+ * ── Responsive foundations ───────────────────────────────────────────────
+ *
+ * The console pages were drawn for a 1180 px analyst screen. Below `lg` they
+ * stop being a fixed dashboard and become an ordinary scrolling document with
+ * an off-canvas filter drawer, so everything here exists to make that second
+ * mode behave on a phone.
+ */
+:root {
+  /* Height of the whole header, including the tab strip that wraps onto its
+     own row below `lg`. Floating notices are pinned against this rather than
+     a hard-coded 46 px that only ever matched the desktop bar. */
+  --nav-h: 84px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --nav-h: 76px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --nav-h: 38px;
+  }
+}
+
+@layer base {
+  html {
+    /* Landscape rotation on iOS otherwise inflates text in the dense panels,
+       which is precisely where there is no room for it. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* A touch screen has no hover to reveal a scrollbar and no pointer precise
+     enough to grab a 7 px one — it costs 7 px of a 360 px viewport for
+     nothing. Native touch overlay scrollbars stay. */
+  @media (pointer: coarse) {
+    *::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+    * {
+      scrollbar-width: none;
+    }
+  }
+}
+
+/* Horizontal strips (the mobile nav, a wide table) that scroll by touch and
+   must not spend vertical space on a bar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Bottom-anchored bars: keep clear of the iOS home indicator without adding
+   dead space on a device that has none. */
+@utility pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* `viewportFit: "cover"` lets the page paint under the notch, which also means
+   side padding has to be earned back in landscape. */
+@utility px-safe {
+  padding-left: max(0.5rem, env(safe-area-inset-left));
+  padding-right: max(0.5rem, env(safe-area-inset-right));
+}
+
+/*
+ * ── Filter sidebar rows ──────────────────────────────────────────────────
+ *
+ * The same markup is the analyst's 188 px sidebar at `lg` and a thumb-driven
+ * drawer below it, so the rows are sized for touch first and shrink back to
+ * console density once there is a mouse and a sidebar to sit in. This lives
+ * here rather than in three near-identical Tailwind strings across
+ * `FilterSidebar`, `EventsFilterSidebar`, and `CaseFilterSidebar`, which is
+ * how those three had already drifted apart.
+ */
+@layer components {
+  .filter-row {
+    display: flex;
+    cursor: pointer;
+    align-items: center;
+    gap: 10px;
+    padding-block: 8px;
+    font-size: 13.5px;
+    color: var(--color-ink-dim);
+  }
+  .filter-row:hover {
+    color: var(--color-ink);
+  }
+
+  .filter-box {
+    height: 20px;
+    width: 20px;
+    flex-shrink: 0;
+    appearance: none;
+    border-radius: 4px;
+    border: 1px solid rgba(90, 140, 190, 0.7);
+    background: transparent;
+  }
+  .filter-box:checked {
+    border-color: var(--color-azure);
+    background: var(--color-azure);
+  }
+  .filter-box:checked::after {
+    content: "✓";
+    display: block;
+    text-align: center;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 700;
+    color: #04070e;
+  }
+  .filter-box:focus-visible {
+    outline: 2px solid var(--color-azure);
+    outline-offset: 2px;
+  }
+
+  /* Option rows that are buttons rather than checkboxes (the range picker). */
+  .filter-option {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    text-align: left;
+    font-size: 13.5px;
+    color: var(--color-ink-dim);
+  }
+  .filter-option:hover {
+    background: rgba(56, 189, 248, 0.07);
+  }
+  .filter-option[aria-pressed="true"] {
+    background: rgba(56, 189, 248, 0.16);
+    color: var(--color-ink);
+  }
+
+  @media (min-width: 1024px) {
+    .filter-row {
+      gap: 8px;
+      padding-block: 3px;
+      font-size: 12px;
+    }
+    .filter-box {
+      height: 14px;
+      width: 14px;
+      border-radius: 3px;
+    }
+    .filter-box:checked::after {
+      font-size: 10px;
+      line-height: 13px;
+    }
+    .filter-option {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+  }
+}

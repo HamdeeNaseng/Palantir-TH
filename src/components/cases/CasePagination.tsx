@@ -26,9 +26,9 @@ function pageWindow(page: number, pageCount: number): (number | "gap")[] {
 }
 
 const STEP =
-  "flex h-6 w-6 items-center justify-center rounded border border-[rgba(56,100,150,0.5)] text-ink-dim hover:border-azure hover:text-ink";
+  "flex h-9 w-9 items-center justify-center rounded border border-[rgba(56,100,150,0.5)] text-ink-dim hover:border-azure hover:text-ink sm:h-6 sm:w-6";
 const STEP_OFF =
-  "flex h-6 w-6 items-center justify-center rounded border border-[rgba(56,100,150,0.25)] text-ink-muted/50";
+  "flex h-9 w-9 items-center justify-center rounded border border-[rgba(56,100,150,0.25)] text-ink-muted/50 sm:h-6 sm:w-6";
 
 export default function CasePagination({
   filters,
@@ -52,7 +52,7 @@ export default function CasePagination({
   return (
     <nav
       aria-label="หน้าของตารางเคส"
-      className="flex items-center justify-between gap-3 border-t border-[rgba(37,66,102,0.45)] px-3.5 py-2"
+      className="flex flex-wrap items-center justify-between gap-2 border-t border-[rgba(37,66,102,0.45)] px-3.5 py-2"
     >
       <p className="num text-[11px] text-ink-muted">
         แสดง {first.toLocaleString("en-US")}–{last.toLocaleString("en-US")} จาก{" "}
@@ -80,16 +80,20 @@ export default function CasePagination({
           </>
         )}
 
+        <span className="num px-1 text-[12px] text-ink-dim sm:hidden">
+          {page} / {pageCount}
+        </span>
+
         {pageWindow(page, pageCount).map((p, i) =>
           p === "gap" ? (
-            <span key={`gap-${i}`} className="px-1 text-[11px] text-ink-muted">
+            <span key={`gap-${i}`} className="hidden px-1 text-[11px] text-ink-muted sm:inline">
               …
             </span>
           ) : p === page ? (
             <span
               key={p}
               aria-current="page"
-              className="num flex h-6 min-w-6 items-center justify-center rounded bg-azure px-1.5 text-[11px] font-medium text-[#04070e]"
+              className="num hidden h-6 min-w-6 items-center justify-center rounded bg-azure px-1.5 text-[11px] font-medium text-[#04070e] sm:flex"
             >
               {p}
             </span>
@@ -98,7 +102,7 @@ export default function CasePagination({
               key={p}
               href={step(p)}
               scroll={false}
-              className="num flex h-6 min-w-6 items-center justify-center rounded border border-[rgba(56,100,150,0.5)] px-1.5 text-[11px] text-ink-dim hover:border-azure hover:text-ink"
+              className="num hidden h-6 min-w-6 items-center justify-center rounded border border-[rgba(56,100,150,0.5)] px-1.5 text-[11px] text-ink-dim hover:border-azure hover:text-ink sm:flex"
             >
               {p}
             </Link>

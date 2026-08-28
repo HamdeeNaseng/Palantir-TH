@@ -17,13 +17,13 @@ const ICONS = {
 
 export default function KpiRow({ kpis }: { kpis: KpiCard[] }) {
   return (
-    <div className="grid h-full grid-cols-4 gap-2">
+    <div className="grid h-full grid-cols-2 gap-2 sm:grid-cols-4">
       {kpis.map((k) => {
         const Icon = ICONS[k.icon];
         return (
           <article key={k.key} className="panel flex h-full items-start gap-3 px-3.5 py-2.5">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] text-ink-dim">{k.label}</p>
+              <p className="text-[12px] leading-snug text-ink-dim sm:truncate">{k.label}</p>
               <p className="num mt-0.5 text-[26px] leading-none font-semibold tracking-tight text-ink">
                 {k.value}
               </p>
@@ -43,7 +43,9 @@ export default function KpiRow({ kpis }: { kpis: KpiCard[] }) {
               ) : (
                 <>
                   <Icon size={17} stroke={1.7} className="text-azure/80" />
-                  <Sparkline points={k.spark} />
+                  <span className="hidden sm:block">
+                    <Sparkline points={k.spark} />
+                  </span>
                 </>
               )}
             </div>

@@ -14,9 +14,9 @@ export default async function EventsPage({
   const data = await getEventsWorkspace(filters);
 
   return (
-    <div className="flex h-screen min-w-[1180px] flex-col overflow-hidden">
+    <div className="flex min-h-dvh flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
       <TopNav active="/events" />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <EventsWorkspace data={data} />
       </div>
     </div>

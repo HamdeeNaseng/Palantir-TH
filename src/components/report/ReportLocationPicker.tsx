@@ -545,7 +545,7 @@ export default function ReportLocationPicker({
           `absolute inset-0`: maplibre-gl.css forces `position: relative` on
           its container, which cancels the insets and collapses the box to zero
           height with no error anywhere. */}
-      <div className="h-[280px] w-full">
+      <div className="h-[min(52vh,340px)] w-full sm:h-[280px]">
         <Map
           ref={mapRef}
           initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: 12 } }}

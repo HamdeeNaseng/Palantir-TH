@@ -420,6 +420,9 @@ export default function MapPanel({
   const [view, setView] = useState<View>("ไฮบริด");
   const [satellite, setSatellite] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
+  // The legend is a permanent 152 px rail beside a desktop map and a third of
+  // a phone screen on top of one, so below `lg` it starts as its header only.
+  const [legendOpen, setLegendOpen] = useState(false);
   const [ready, setReady] = useState(false);
   // Sticky: once the analyst has been in close, the files are cached anyway.
   const [detail, setDetail] = useState(false);
@@ -596,7 +599,7 @@ export default function MapPanel({
   }).format(new Date(currentTimestamp));
 
   return (
-    <section className="panel relative h-full min-h-0 overflow-hidden">
+    <section className="panel relative h-[58vh] max-h-[520px] min-h-[320px] overflow-hidden lg:h-full lg:max-h-none lg:min-h-0">
       {/* Size this with width/height 100%, not `absolute inset-0`:
           maplibre-gl.css sets `.maplibregl-map { position: relative }` on the
           container react-map-gl creates, which overrides absolute positioning.
@@ -726,7 +729,7 @@ export default function MapPanel({
 
       <div className="pointer-events-none absolute inset-0">
         {/* View switcher */}
-        <div className="pointer-events-auto absolute top-2.5 left-3 flex items-center gap-1 rounded bg-[rgba(6,13,25,0.85)] p-0.5">
+        <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-1 rounded bg-[rgba(6,13,25,0.85)] p-0.5 lg:top-2.5 lg:left-3">
           {VIEWS.map((v) => (
             <button
               key={v}
@@ -734,8 +737,8 @@ export default function MapPanel({
               onClick={() => setView(v)}
               className={
                 v === view
-                  ? "rounded bg-azure px-2.5 py-1 text-[11.5px] font-medium text-[#04070e]"
-                  : "rounded px-2.5 py-1 text-[11.5px] text-ink-dim hover:text-ink"
+                  ? "min-h-9 rounded bg-azure px-3 text-[12.5px] font-medium text-[#04070e] lg:min-h-0 lg:px-2.5 lg:py-1 lg:text-[11.5px]"
+                  : "min-h-9 rounded px-3 text-[12.5px] text-ink-dim hover:text-ink lg:min-h-0 lg:px-2.5 lg:py-1 lg:text-[11.5px]"
               }
             >
               {v}
@@ -743,7 +746,7 @@ export default function MapPanel({
           ))}
         </div>
 
-        <div className="pointer-events-auto absolute top-11 left-3">
+        <div className="pointer-events-auto absolute top-11 left-2 lg:left-3">
           <button
             type="button"
             onClick={() => setLayersOpen((v) => !v)}
@@ -783,7 +786,7 @@ export default function MapPanel({
         </div>
 
         {/* Zoom + recentre */}
-        <div className="pointer-events-auto absolute top-24 left-3 flex flex-col gap-1.5">
+        <div className="pointer-events-auto absolute top-24 left-2 flex flex-col gap-1.5 lg:left-3">
           <div className="flex flex-col overflow-hidden rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)]">
             <button
               type="button"
@@ -823,9 +826,23 @@ export default function MapPanel({
         </div>
 
         {/* Legend */}
-        <div className="absolute top-2.5 right-2.5 flex max-h-[calc(100%-1.25rem)] w-[152px] flex-col overflow-y-auto rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5">
-          <p className="mb-1.5 text-[11.5px] font-semibold text-ink">สัญลักษณ์</p>
-          <ul className="space-y-1">
+        <div className="pointer-events-auto absolute top-14 right-2 flex max-h-[calc(100%-4rem)] w-[136px] flex-col overflow-y-auto rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5 lg:top-2.5 lg:right-2.5 lg:max-h-[calc(100%-1.25rem)] lg:w-[152px]">
+          <button
+            type="button"
+            onClick={() => setLegendOpen((v) => !v)}
+            aria-expanded={legendOpen}
+            className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold text-ink lg:cursor-default"
+          >
+            สัญลักษณ์
+            <IconChevronDown
+              size={14}
+              stroke={2}
+              className={`ml-auto text-ink-muted transition-transform lg:hidden ${
+                legendOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          <ul className={`space-y-1 lg:block ${legendOpen ? "block" : "hidden"}`}>
             {LEGEND.map((g) => (
               <li key={g.family}>
                 <p className="text-[9.5px] tracking-wide text-ink-muted uppercase">{g.label}</p>
@@ -873,7 +890,7 @@ export default function MapPanel({
           </ul>
         </div>
 
-        <p className="absolute bottom-2 left-3 flex items-center gap-2 text-[9.5px] text-ink-muted">
+        <p className="absolute bottom-1 left-2 flex flex-wrap items-center gap-x-2 text-[9.5px] text-ink-muted lg:bottom-2 lg:left-3 lg:flex-nowrap">
           <span>ขอบเขตการปกครอง: กรมป้องกันและบรรเทาสาธารณภัย (DDPM)</span>
           <span className="text-ink-muted/50">·</span>
           <span className="num">{events.features.length.toLocaleString("en-US")} เหตุการณ์</span>
@@ -883,7 +900,7 @@ export default function MapPanel({
             (e.g. EventsWorkspace) has its own dedicated Timeline panel, and
             two playheads on screen at once would just fight each other. */}
         {!isControlled && (
-          <div className="pointer-events-auto absolute bottom-6 left-1/2 w-[430px] -translate-x-1/2 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 py-1.5 shadow-lg">
+          <div className="pointer-events-auto absolute inset-x-2 bottom-6 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 py-1.5 shadow-lg lg:inset-x-auto lg:left-1/2 lg:w-[430px] lg:-translate-x-1/2">
             <div className="mb-1 flex items-center gap-2">
               <button
                 type="button"
@@ -912,7 +929,7 @@ export default function MapPanel({
                 setCurrentTimestamp(Number(event.target.value));
               }}
               aria-label="ช่วงเวลาที่แสดงบนแผนที่"
-              className="block h-1 w-full cursor-pointer accent-sky-400"
+              className="block h-6 w-full cursor-pointer accent-sky-400 lg:h-1"
             />
           </div>
         )}

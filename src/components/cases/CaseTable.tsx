@@ -108,7 +108,19 @@ function Severity({ severity, label }: { severity: number | null; label: string 
 }
 
 const HEAD = "px-3 py-2 text-left text-[10.5px] font-normal whitespace-nowrap";
-const CELL = "px-3 py-[9px] align-middle";
+const CELL = "px-3 py-3 align-middle sm:py-[9px]";
+
+/**
+ * Ten columns is a reasonable register on a 1180 px console and an unreadable
+ * one on a phone. Rather than a second card layout to keep in step with this
+ * table, the columns drop out in order of how much they add to *identifying*
+ * a case: date, headline, and status survive to the narrowest screen, and the
+ * rest come back as the viewport earns them. Every hidden field is still on
+ * the case's own page, one tap away.
+ */
+const AT_SM = "hidden sm:table-cell";
+const AT_LG = "hidden lg:table-cell";
+const AT_XL = "hidden xl:table-cell";
 
 export default function CaseTable({
   rows,
@@ -126,21 +138,27 @@ export default function CaseTable({
     <table className="w-full border-separate border-spacing-0">
       <thead className="sticky top-0 z-10 bg-[#0b1524]">
         <tr className="border-b border-[rgba(37,66,102,0.55)]">
-          <SortHeader label="วันที่เกิดเหตุ" sortKey="date" filters={filters} className={HEAD} basePath={basePath} />
+          <SortHeader
+            label="วันที่เกิดเหตุ"
+            sortKey="date"
+            filters={filters}
+            className={`${HEAD} whitespace-normal sm:whitespace-nowrap`}
+            basePath={basePath}
+          />
           <PlainHeader label="หัวข้อที่แหล่งข้อมูลรายงาน" className={HEAD} />
-          <SortHeader label="ประเภท" sortKey="type" filters={filters} className={HEAD} basePath={basePath} />
-          <SortHeader label="พื้นที่" sortKey="province" filters={filters} className={HEAD} basePath={basePath} />
-          <SortHeader label="สถานะ" sortKey="verification" filters={filters} className={HEAD} basePath={basePath} />
-          <PlainHeader label="ความรุนแรง" className={HEAD} />
+          <SortHeader label="ประเภท" sortKey="type" filters={filters} className={`${HEAD} ${AT_SM}`} basePath={basePath} />
+          <SortHeader label="พื้นที่" sortKey="province" filters={filters} className={`${HEAD} ${AT_LG}`} basePath={basePath} />
+          <SortHeader label="สถานะ" sortKey="verification" filters={filters} className={`${HEAD} ${AT_SM}`} basePath={basePath} />
+          <PlainHeader label="ความรุนแรง" className={`${HEAD} ${AT_LG}`} />
           <SortHeader
             label="ความเชื่อมั่น"
             sortKey="confidence"
             filters={filters}
-            className={`${HEAD} text-right`}
+            className={`${HEAD} ${AT_XL} text-right`}
             basePath={basePath}
           />
-          <PlainHeader label="แหล่งข้อมูล" className={HEAD} />
-          <PlainHeader label="แนบ" className={`${HEAD} text-center`} />
+          <PlainHeader label="แหล่งข้อมูล" className={`${HEAD} ${AT_XL}`} />
+          <PlainHeader label="แนบ" className={`${HEAD} ${AT_SM} text-center`} />
           <th scope="col" className={HEAD}>
             <span className="sr-only">เปิดเคส</span>
           </th>
@@ -163,7 +181,7 @@ function CaseTableRow({ row: r, href }: { row: CaseRow; href: string }) {
       href={href}
       className="cursor-pointer border-t border-[rgba(37,66,102,0.3)] hover:bg-[rgba(56,189,248,0.06)]"
     >
-      <td className={`${CELL} num text-[11px] whitespace-nowrap text-ink-dim`}>
+      <td className={`${CELL} num w-[88px] text-[11px] whitespace-normal text-ink-dim sm:w-auto sm:whitespace-nowrap`}>
         {formatByPrecision(r.at, r.timePrecision)}
         {r.timePrecision === "day" && (
           <span className="ml-1 text-ink-muted" title="แหล่งข้อมูลระบุความละเอียดของเวลาเป็นระดับวัน">
@@ -172,10 +190,10 @@ function CaseTableRow({ row: r, href }: { row: CaseRow; href: string }) {
         )}
       </td>
 
-      <td className={`${CELL} max-w-[300px]`}>
+      <td className={`${CELL} max-w-[62vw] sm:max-w-[300px]`}>
         <Link
           href={href}
-          className="block truncate text-[12px] text-ink hover:text-azure hover:underline"
+          className="block truncate text-[13px] text-ink hover:text-azure hover:underline sm:text-[12px]"
           title={r.title}
         >
           {r.title}
@@ -185,9 +203,14 @@ function CaseTableRow({ row: r, href }: { row: CaseRow; href: string }) {
             {r.place}
           </span>
         )}
+        {/* The status column is gone at this width, so it rides along here
+            rather than leaving a claim on the screen with no standing. */}
+        <span className="mt-1 flex sm:hidden">
+          <VerificationChip label={r.verificationLabel} status={r.verification} />
+        </span>
       </td>
 
-      <td className={`${CELL} whitespace-nowrap`}>
+      <td className={`${CELL} ${AT_SM} whitespace-nowrap`}>
         <span
           className="inline-flex items-center gap-1.5 text-[11.5px]"
           style={{ color: r.typeColor }}
@@ -201,27 +224,27 @@ function CaseTableRow({ row: r, href }: { row: CaseRow; href: string }) {
         </span>
       </td>
 
-      <td className={`${CELL} text-[11.5px] whitespace-nowrap text-ink-dim`}>
+      <td className={`${CELL} ${AT_LG} text-[11.5px] whitespace-nowrap text-ink-dim`}>
         {r.subdistrict ? `ต.${r.subdistrict} ` : ""}
         อ.{r.district}
         <span className="ml-1 text-ink-muted">จ.{r.province}</span>
       </td>
 
-      <td className={`${CELL} whitespace-nowrap`}>
+      <td className={`${CELL} ${AT_SM} whitespace-nowrap`}>
         <VerificationChip label={r.verificationLabel} status={r.verification} />
       </td>
 
-      <td className={`${CELL} whitespace-nowrap`}>
+      <td className={`${CELL} ${AT_LG} whitespace-nowrap`}>
         <Severity severity={r.severity} label={r.severityLabel} />
       </td>
 
-      <td className={`${CELL} num text-right text-[11.5px] whitespace-nowrap text-ink-dim`}>
+      <td className={`${CELL} ${AT_XL} num text-right text-[11.5px] whitespace-nowrap text-ink-dim`}>
         {r.confidence}%
       </td>
 
-      <td className={`${CELL} text-[11px] whitespace-nowrap text-ink-dim`}>{r.sourceName}</td>
+      <td className={`${CELL} ${AT_XL} text-[11px] whitespace-nowrap text-ink-dim`}>{r.sourceName}</td>
 
-      <td className={`${CELL} text-center whitespace-nowrap`}>
+      <td className={`${CELL} ${AT_SM} text-center whitespace-nowrap`}>
         {r.mediaCount > 0 ? (
           <span
             className="inline-flex items-center gap-0.5 text-[11px] text-cyan"

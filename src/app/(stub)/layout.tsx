@@ -3,5 +3,5 @@
  * consistent so the tabs in the mockup are all reachable.
  */
 export default function StubLayout({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-screen flex-col overflow-hidden">{children}</div>;
+  return <div className="flex min-h-dvh flex-col lg:h-screen lg:overflow-hidden">{children}</div>;
 }

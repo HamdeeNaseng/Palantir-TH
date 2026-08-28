@@ -30,11 +30,14 @@ export default async function MapPage({
   const data = await getMapOverview(filters);
 
   return (
-    <div className="flex h-screen min-w-[900px] flex-col overflow-hidden">
+    // The one page that stays viewport-height everywhere: a map is the thing
+    // being read, so it takes the whole screen on a phone too. What changes
+    // below `lg` is the furniture on top of it — see `MapWorkspace`.
+    <div className="flex h-dvh flex-col overflow-hidden lg:min-w-[900px]">
       <TopNav active="/map" />
 
       {!data.live && (
-        <p className="pointer-events-none fixed top-[46px] left-1/2 z-50 -translate-x-1/2 rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
+        <p className="pointer-events-none fixed top-[calc(var(--nav-h)_+_8px)] left-1/2 z-50 max-w-[92vw] -translate-x-1/2 rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
           ยังเชื่อมต่อ MongoDB ไม่ได้ — ให้รัน{" "}
           <code className="font-mono">docker compose up -d</code> แล้ว{" "}
           <code className="font-mono">npm run db:seed</code>

@@ -32,15 +32,18 @@ export default async function CasesPage({
   const backRef = `?ref=${encodeURIComponent(listPath)}`;
 
   return (
-    <div className="flex h-screen min-w-[1180px] flex-col overflow-hidden">
+    // Fixed analyst shell at `lg` — the table scrolls inside its panel and the
+    // page itself never does. Below that it is a normal document: the register
+    // is worth reading on a phone, and 1180 px of forced width is not how.
+    <div className="flex min-h-dvh flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
       <TopNav active="/cases" />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <CaseFilterSidebar initial={filters} facets={data.facets} span={data.span} />
 
-        <main className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden bg-abyss p-2">
+        <main className="flex min-w-0 flex-1 flex-col gap-2 bg-abyss p-2 lg:overflow-hidden">
           <section className="panel shrink-0 overflow-visible">
-            <div className="flex items-center gap-3 px-3.5 py-2.5">
+            <div className="flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:gap-3">
               <div className="min-w-0">
                 <h1 className="panel-title whitespace-nowrap">ทะเบียนเคส</h1>
                 <p className="num text-[10.5px] whitespace-nowrap text-ink-muted">

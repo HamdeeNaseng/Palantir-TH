@@ -68,7 +68,7 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
   ];
 
   return (
-    <aside className="panel flex h-full min-h-0 w-full flex-col overflow-y-auto bg-[#070e1b]">
+    <aside className="panel flex h-full max-h-[70vh] min-h-0 w-full flex-col overflow-y-auto bg-[#070e1b] lg:max-h-none">
       <header className="flex items-center justify-between border-b border-[rgba(37,66,102,0.55)] px-3.5 py-2.5">
         <h2 className="text-[13px] font-semibold text-ink">เคสที่กำลังติดตาม</h2>
         <button

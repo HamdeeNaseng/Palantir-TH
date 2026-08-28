@@ -13,11 +13,13 @@ import Map, {
 import type { DataDrivenPropertyValueSpecification, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+  IconChevronDown,
   IconCurrentLocation,
   IconMap2,
   IconMinus,
   IconPlus,
   IconSatellite,
+  IconStack2,
 } from "@tabler/icons-react";
 import { AREA_DENSITY_SCALE } from "@/lib/palette";
 import {
@@ -56,7 +58,20 @@ const THAILAND_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 /** Keeps fitted geometry clear of the two overlay columns. */
+/**
+ * Room left for the furniture that sits on top of the map, so a fitted area
+ * lands in the clear part of it rather than under the level picker.
+ *
+ * These are also a hazard: MapLibre cannot satisfy a fit whose padding is
+ * wider than the container, and rather than clamping it gives up and leaves
+ * the camera wherever it was — which on a phone meant opening `/map` to a view
+ * of the whole world. The desktop numbers describe the desktop furniture
+ * (190 px of controls on the left, a 268 px rail on the right); below `lg`
+ * that furniture is a collapsed button and a bottom sheet, and the padding has
+ * to describe *those* instead.
+ */
 const FIT_PADDING = { top: 16, bottom: 88, left: 190, right: 268 };
+const FIT_PADDING_NARROW = { top: 56, bottom: 150, left: 12, right: 12 };
 
 const DATA = {
   thailand: "/data/thailand-provinces.geojson",
@@ -210,6 +225,14 @@ export default function MapWorkspace({
   const [popup, setPopup] = useState<AreaPopup | null>(null);
   const [events, setEvents] = useState<EventFeatureCollection | null>(null);
   const [eventsError, setEventsError] = useState(false);
+  /**
+   * Two panels of furniture that are permanent fixtures on a 1440 px screen
+   * would cover most of a phone. Below `lg` they collapse to their headers and
+   * the reader opens the one they want; at `lg` the `lg:` classes below force
+   * both open regardless of this state, so the analyst view is unchanged.
+   */
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [rankedOpen, setRankedOpen] = useState(false);
 
   const mapStyle = useMemo(() => baseStyle(), []);
 
@@ -298,13 +321,27 @@ export default function MapWorkspace({
    * than one that visibly cannot be clicked yet.
    */
   const flyTo = useCallback((bbox: [number, number, number, number]) => {
+    const width = mapRef.current?.getMap().getContainer().clientWidth ?? 0;
     mapRef.current?.fitBounds(
       [
         [bbox[0], bbox[1]],
         [bbox[2], bbox[3]],
       ],
-      { padding: FIT_PADDING, maxZoom: 12.5, duration: 800 },
+      {
+        padding: width >= 1024 ? FIT_PADDING : FIT_PADDING_NARROW,
+        maxZoom: 12.5,
+        duration: 800,
+      },
     );
+  }, []);
+
+  /**
+   * Measured off the live container rather than a media query, because the
+   * question is only ever "does this padding fit in this box".
+   */
+  const fitPadding = useCallback(() => {
+    const width = mapRef.current?.getMap().getContainer().clientWidth ?? 0;
+    return width >= 1024 ? FIT_PADDING : FIT_PADDING_NARROW;
   }, []);
 
   const nudgeZoom = (d: number) =>
@@ -323,7 +360,7 @@ export default function MapWorkspace({
     <div className="relative min-h-0 flex-1">
       <Map
         ref={mapRef}
-        initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: FIT_PADDING } }}
+        initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: 16 } }}
         mapStyle={mapStyle}
         style={{ width: "100%", height: "100%" }}
         attributionControl={false}
@@ -332,6 +369,7 @@ export default function MapWorkspace({
         cursor={showAreas ? "pointer" : undefined}
         onLoad={(e) => {
           setReady(true);
+          e.target.fitBounds(BOUNDS, { padding: fitPadding(), duration: 0 });
           setZoom(e.target.getZoom());
         }}
         onZoomEnd={(e) => setZoom(e.viewState.zoom)}
@@ -395,7 +433,27 @@ export default function MapWorkspace({
 
       <div className="pointer-events-none absolute inset-0">
         {/* Level + layers */}
-        <div className="pointer-events-auto absolute top-2.5 left-3 w-[178px] rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] p-2.5">
+        <div className="pointer-events-auto absolute top-2.5 left-2 w-[178px] lg:left-3">
+          <button
+            type="button"
+            onClick={() => setControlsOpen((v) => !v)}
+            aria-expanded={controlsOpen}
+            className="mb-1 flex min-h-10 w-full items-center gap-1.5 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 text-[12.5px] text-ink-dim lg:hidden"
+          >
+            <IconStack2 size={15} stroke={1.7} />
+            ตัวเลือกแผนที่
+            <IconChevronDown
+              size={14}
+              stroke={2}
+              className={`ml-auto transition-transform ${controlsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          <div
+            className={`rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] p-2.5 lg:block ${
+              controlsOpen ? "block" : "hidden"
+            }`}
+          >
           <p className="mb-1.5 text-[11.5px] font-semibold text-ink">หน่วยพื้นที่</p>
           <div className="mb-2 flex flex-col gap-0.5">
             {(["auto", "province", "district", "subdistrict"] as const).map((option) => {
@@ -441,10 +499,13 @@ export default function MapWorkspace({
             icon={<IconSatellite size={12} stroke={1.7} />}
             disabled={!ready}
           />
+          </div>
         </div>
 
-        {/* Zoom + framing */}
-        <div className="pointer-events-auto absolute bottom-6 left-3 flex flex-col gap-1.5">
+        {/* Zoom + framing. Bottom-left is where a mouse expects them and where
+            the mobile ranked sheet needs the room, so on a phone they move to
+            the free edge instead. */}
+        <div className="pointer-events-auto absolute top-2.5 right-2 flex flex-col gap-1.5 lg:top-auto lg:right-auto lg:bottom-6 lg:left-3">
           <div className="flex flex-col overflow-hidden rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)]">
             <button
               type="button"
@@ -470,7 +531,7 @@ export default function MapWorkspace({
             aria-label="โฟกัส 4 จังหวัดชายแดนใต้"
             disabled={!ready}
             title="โฟกัส 4 จังหวัดชายแดนใต้"
-            onClick={() => mapRef.current?.fitBounds(BOUNDS, { padding: FIT_PADDING })}
+            onClick={() => mapRef.current?.fitBounds(BOUNDS, { padding: fitPadding() })}
             className="rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] px-1.5 py-1 text-ink-dim hover:text-ink"
           >
             <IconCurrentLocation size={14} stroke={1.8} />
@@ -480,33 +541,50 @@ export default function MapWorkspace({
             aria-label="ดูทั้งประเทศ"
             disabled={!ready}
             title="ดูทั้งประเทศ"
-            onClick={() => mapRef.current?.fitBounds(THAILAND_BOUNDS, { padding: FIT_PADDING })}
+            onClick={() => mapRef.current?.fitBounds(THAILAND_BOUNDS, { padding: fitPadding() })}
             className="rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] px-1.5 py-1 text-ink-dim hover:text-ink"
           >
             <IconMap2 size={14} stroke={1.8} />
           </button>
         </div>
 
-        {/* Ranked areas */}
-        <div className="pointer-events-auto absolute top-2.5 right-2.5 flex max-h-[calc(100%-1.25rem)] w-[254px] flex-col rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)]">
-          <div className="border-b border-[rgba(37,66,102,0.6)] px-3 py-2">
-            <p className="text-[11.5px] font-semibold text-ink">
-              {meta.label}ที่มีเหตุการณ์มากที่สุด
-            </p>
-            <p className="num text-[10px] text-ink-muted">
-              {data.touched[level].toLocaleString("en-US")} {meta.label}มีเหตุการณ์ ·{" "}
-              {data.totals.placed.toLocaleString("en-US")} จุด
-            </p>
+        {/* Ranked areas — a right rail beside the map on a wide screen, a
+            bottom sheet under it on a phone, where vertical space is the only
+            space there is. */}
+        <div className="pointer-events-auto absolute inset-x-2 bottom-9 flex max-h-[42vh] flex-col rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] lg:inset-x-auto lg:top-2.5 lg:right-2.5 lg:bottom-auto lg:max-h-[calc(100%-1.25rem)] lg:w-[254px]">
+          <div className="flex items-center gap-2 border-b border-[rgba(37,66,102,0.6)] px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11.5px] font-semibold text-ink">
+                {meta.label}ที่มีเหตุการณ์มากที่สุด
+              </p>
+              <p className="num text-[10px] text-ink-muted">
+                {data.touched[level].toLocaleString("en-US")} {meta.label}มีเหตุการณ์ ·{" "}
+                {data.totals.placed.toLocaleString("en-US")} จุด
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRankedOpen((v) => !v)}
+              aria-expanded={rankedOpen}
+              aria-label="สลับรายการอันดับพื้นที่"
+              className="-mr-1 flex h-9 w-9 shrink-0 items-center justify-center text-ink-muted lg:hidden"
+            >
+              <IconChevronDown
+                size={18}
+                stroke={2}
+                className={`transition-transform ${rankedOpen ? "rotate-180" : ""}`}
+              />
+            </button>
           </div>
 
-          <ul className="min-h-0 flex-1 overflow-y-auto">
+          <ul className={`min-h-0 flex-1 overflow-y-auto lg:block ${rankedOpen ? "block" : "hidden"}`}>
             {data.top[level].map((row) => (
               <li key={row.code}>
                 <button
                   type="button"
                   onClick={() => flyTo(row.bbox)}
                   disabled={!ready}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[rgba(56,189,248,0.08)] disabled:cursor-default disabled:hover:bg-transparent"
+                  className="flex min-h-10 w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[rgba(56,189,248,0.08)] disabled:cursor-default disabled:hover:bg-transparent lg:min-h-0"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[11.5px] text-ink">{row.name}</span>
@@ -541,7 +619,11 @@ export default function MapWorkspace({
           </ul>
 
           {/* Scale */}
-          <div className="border-t border-[rgba(37,66,102,0.6)] px-3 py-2">
+          <div
+            className={`border-t border-[rgba(37,66,102,0.6)] px-3 py-2 lg:block ${
+              rankedOpen ? "block" : "hidden"
+            }`}
+          >
             <p className="mb-1 text-[10px] text-ink-muted">จำนวนเหตุการณ์ต่อ{meta.label}</p>
             <div className="flex items-center gap-1.5">
               <div className="flex flex-1 overflow-hidden rounded-[2px]">
@@ -566,7 +648,7 @@ export default function MapWorkspace({
         </div>
 
         {/* Provenance + what is not on the map */}
-        <p className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-2 text-[9.5px] whitespace-nowrap text-ink-muted">
+        <p className="absolute inset-x-2 bottom-1.5 flex flex-wrap items-center justify-center gap-x-2 text-center text-[9.5px] text-ink-muted lg:inset-x-auto lg:bottom-2 lg:left-1/2 lg:-translate-x-1/2 lg:flex-nowrap lg:whitespace-nowrap">
           <span>ขอบเขตการปกครอง: กรมป้องกันและบรรเทาสาธารณภัย (DDPM)</span>
           {data.totals.unplaced > 0 && (
             <>
