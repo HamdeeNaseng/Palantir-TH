@@ -20,7 +20,11 @@ const MUEANG_PATTANI = { longitude: 101.2537, latitude: 6.8698 };
 const SNAPPED_READOUT = "6.870, 101.254";
 
 /**
- * Opens the intake form and waits for the map to be usable.
+ * Opens the intake form and walks to the location question.
+ *
+ * The form asks one thing per screen, so reaching the map means answering the
+ * two questions before it — which is also worth having in the path: if the
+ * wizard ever stops advancing, every test in this file says so.
  *
  * The GPS button stays disabled until react-map-gl has loaded maplibre and
  * fetched the boundary polygons, because nothing can be hit-tested before
@@ -30,6 +34,20 @@ const SNAPPED_READOUT = "6.870, 101.254";
 async function openIntakeForm(page: Page) {
   await page.goto("/report");
   await page.getByRole("button", { name: /แจ้งเหตุการณ์ใหม่/ }).click();
+
+  // 1. เกิดเรื่องอะไรขึ้น — the card is a label wrapping a visually-hidden
+  // radio, so the click goes where a citizen's thumb goes: the card itself,
+  // located through the radio it labels (the same words appear in the report
+  // table further down the page).
+  await page.getByRole("radio", { name: "ยิง/ปะทะ" }).locator("xpath=..").click();
+  await expect(page.getByRole("radio", { name: "ยิง/ปะทะ" })).toBeChecked();
+  await page.getByRole("button", { name: /ถัดไป/ }).click();
+
+  // 2. เล่าให้ฟังสั้น ๆ
+  await page.getByLabel(/เกิดอะไรขึ้น/).fill("ทดสอบการปักหมุด");
+  await page.getByRole("button", { name: /ถัดไป/ }).click();
+
+  // 3. เกิดที่ไหน
   await expect(page.getByRole("button", { name: /ใช้ตำแหน่งปัจจุบัน/ })).toBeEnabled({
     timeout: 30_000,
   });

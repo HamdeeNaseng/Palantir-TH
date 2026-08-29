@@ -3,6 +3,7 @@ import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { PROVINCES } from "@/lib/geo";
 import { districtsOfProvince } from "@/lib/geography";
 import { SNAPSHOT_SCHEMA, type Snapshot } from "@/lib/snapshot";
+import { asGeoPrecision } from "@/lib/types";
 import { loadBundle, type RawBundle } from "./shared-events";
 
 /**
@@ -94,7 +95,9 @@ export function toSnapshot(bundle: RawBundle, builtAtMs: number): Omit<Snapshot,
         subdistrict: e.location.subdistrict ?? null,
         lng: e.location.geo?.coordinates[0] ?? null,
         lat: e.location.geo?.coordinates[1] ?? null,
-        precision: e.location.geo_precision ?? null,
+        // Normalised here so every browser-side consumer of the snapshot
+        // (map features, flow legs) gets a radius rather than `undefined`.
+        precision: asGeoPrecision(e.location.geo_precision),
         severity: e.severity,
         confidence: e.confidence,
         verification: e.verification,

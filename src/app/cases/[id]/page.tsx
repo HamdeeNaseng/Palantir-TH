@@ -19,7 +19,7 @@ import {
   SEVERITY_LABEL,
   VERIFICATION_LABEL,
 } from "@/lib/labels";
-import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
+import { asGeoPrecision, GEO_PRECISION_RADIUS_M } from "@/lib/types";
 import type { CaseCorrectionDoc } from "@/lib/types";
 import { formatByPrecision, formatThaiDateLong, formatThaiDateTime } from "@/lib/datetime";
 import { getCaseDetail, type CaseDetail } from "@/server/cases";
@@ -113,7 +113,11 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
   const verificationColor = VERIFICATION_COLOR[current.verification];
   const coordinates = current.location.geo?.coordinates ?? null;
   const [lng, lat] = coordinates ?? [0, 0];
-  const precision = current.location.geo_precision ?? "unknown";
+  // Normalised, not read straight off the document: a connector-specific
+  // value such as `subdistrict_reference_estimated` used to index out of
+  // `GEO_PRECISION_RADIUS_M` as `undefined`, which reached the map as a NaN
+  // viewport and this panel's caption as "คลาดเคลื่อนราว NaN กม.".
+  const precision = asGeoPrecision(current.location.geo_precision);
   const precisionM = GEO_PRECISION_RADIUS_M[precision];
   /**
    * The address-derived position, used only when no coordinate was published.

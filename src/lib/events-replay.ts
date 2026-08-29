@@ -1,4 +1,6 @@
 import { detectHotspotsFromCounts, tallyHotspot, type HotspotCounts } from "./stats";
+import { EVENT_FAMILY } from "./types";
+import type { EventFamily, EventType } from "./types";
 import type { EventFeature } from "@/server/shared-events";
 
 /**
@@ -38,42 +40,104 @@ export function playedSoFar(features: EventFeature[], currentTimestampMs: number
 
 /** How far back the scoped time-path looks from the playhead. */
 export const PATH_WINDOW_MS = 90 * 86400000;
-/** How many of the most-recent points in that window it keeps. */
+/** How many of the most-recent points in that window it keeps, per group. */
 export const PATH_MAX_POINTS = 20;
 
 /**
- * The events behind the "recent movement" line — the mockup's เส้นทางเวลา,
+ * The only families a link line is ever drawn for.
+ *
+ * A line between two events asserts that they are plausibly the same
+ * behaviour moving through space — one actor, one network, one campaign. That
+ * claim is meaningful for the human families and meaningless for the rest: two
+ * floods a week apart are not a flood travelling, and joining a house fire to
+ * a road accident draws a corridor nobody can act on. Natural hazards
+ * (`disaster`), accidents (`safety`) and `other` are therefore never linked —
+ * they still appear as dots, still count toward ความชุก (the cluster rings and
+ * their summary) and ความหนาแน่น (the density score), which are per-area
+ * measures and make no claim about any pair of events.
+ */
+export const LINKABLE_FAMILIES = ["violence", "gang", "narcotics", "crime"] as const;
+
+export type LinkableFamily = (typeof LINKABLE_FAMILIES)[number];
+
+const LINKABLE = new Set<EventFamily>(LINKABLE_FAMILIES);
+
+/** The family a link line may be drawn within, or `null` if this type links to nothing. */
+export function linkFamilyOf(type: EventType): LinkableFamily | null {
+  const family = EVENT_FAMILY[type];
+  return LINKABLE.has(family) ? (family as LinkableFamily) : null;
+}
+
+/** One family's chronological chain of events — never crosses into another family. */
+export interface LinkGroup {
+  family: LinkableFamily;
+  /** Ascending by `ts`, at least 2 long. */
+  features: EventFeature[];
+}
+
+/**
+ * The events behind the "recent movement" lines — the mockup's เส้นทางเวลา,
  * scoped down from "every matched event ever" (which would be an unreadable
  * tangle across 24 years of real data) to the last `PATH_MAX_POINTS` events
- * within `PATH_WINDOW_MS` of the playhead, chronological order. Empty below 2
- * points: a one-point "path" isn't a path, it's a single dot pretending to be
- * a line. Shared by `scopedTimePath` (the straight-line rendering) and the
- * road-network flow-corridor layer, which needs the full features — not just
- * coordinates — to pair up event ids.
+ * within `PATH_WINDOW_MS` of the playhead.
+ *
+ * Split per family rather than returned as one chain. A single chain through
+ * whatever happened to be most recent connected a shooting to the flood that
+ * followed it purely because they were adjacent in time — the line looked like
+ * a finding and was an artefact of sorting. Each group is now one family's own
+ * chain, and only the four families in `LINKABLE_FAMILIES` get one at all.
+ *
+ * Groups below 2 points are dropped: a one-point "path" isn't a path, it's a
+ * single dot pretending to be a line. Returned in `LINKABLE_FAMILIES` order so
+ * the rendering is stable from tick to tick. Shared by `scopedTimePaths` (the
+ * straight-line rendering) and the road-network flow-corridor layer, which
+ * needs the full features — not just coordinates — to pair up event ids.
  */
-export function scopedWindow(features: EventFeature[], currentTimestampMs: number): EventFeature[] {
+export function scopedLinkGroups(
+  features: EventFeature[],
+  currentTimestampMs: number,
+): LinkGroup[] {
   const idx = lastIndexAtOrBefore(features, currentTimestampMs);
   if (idx < 0) return [];
 
   const cutoff = currentTimestampMs - PATH_WINDOW_MS;
-  const candidates: EventFeature[] = [];
-  for (let i = idx; i >= 0 && candidates.length < PATH_MAX_POINTS; i--) {
-    if (features[i].properties.ts < cutoff) break;
-    candidates.push(features[i]);
-  }
-  if (candidates.length < 2) return [];
+  const byFamily = new Map<LinkableFamily, EventFeature[]>();
 
-  // `candidates` was collected walking backward from the playhead; the path
-  // should be drawn in chronological order.
-  return candidates.reverse();
+  // One backward walk for all four families. It stops as soon as every family
+  // is full, so a dense window costs `4 * PATH_MAX_POINTS` events rather than
+  // a scan of everything played so far — this runs on every playhead tick.
+  let full = 0;
+  for (let i = idx; i >= 0 && full < LINKABLE_FAMILIES.length; i--) {
+    const f = features[i];
+    if (f.properties.ts < cutoff) break;
+    const family = linkFamilyOf(f.properties.type);
+    if (!family) continue;
+    const bucket = byFamily.get(family);
+    if (!bucket) {
+      byFamily.set(family, [f]);
+    } else if (bucket.length < PATH_MAX_POINTS) {
+      bucket.push(f);
+      if (bucket.length === PATH_MAX_POINTS) full += 1;
+    }
+  }
+
+  return LINKABLE_FAMILIES.flatMap((family) => {
+    const bucket = byFamily.get(family);
+    if (!bucket || bucket.length < 2) return [];
+    // Collected walking backward from the playhead; drawn in chronological order.
+    return [{ family, features: bucket.reverse() }];
+  });
 }
 
-/** Straight-line coordinates through `scopedWindow` — the always-on, zero-cost fallback. */
-export function scopedTimePath(
+/** One straight-line path per linkable family — the always-on, zero-cost fallback. */
+export function scopedTimePaths(
   features: EventFeature[],
   currentTimestampMs: number,
-): [number, number][] {
-  return scopedWindow(features, currentTimestampMs).map((f) => f.geometry.coordinates);
+): { family: LinkableFamily; coordinates: [number, number][] }[] {
+  return scopedLinkGroups(features, currentTimestampMs).map((g) => ({
+    family: g.family,
+    coordinates: g.features.map((f) => f.geometry.coordinates),
+  }));
 }
 
 export interface DistrictCluster {

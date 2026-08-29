@@ -14,8 +14,8 @@ import {
   districtClusters,
   phenomenaSummary,
   playedSoFar,
-  scopedTimePath,
-  scopedWindow,
+  scopedLinkGroups,
+  scopedTimePaths,
 } from "@/lib/events-replay";
 import { useFlowLegs } from "@/lib/flow/use-flow-legs";
 import SnapshotStatusNote from "@/components/layout/SnapshotStatusNote";
@@ -162,13 +162,22 @@ export default function EventsWorkspace({
   }, [playing, playbackStartMs, playbackEndMs, speed]);
 
   const playedFeatures = useMemo(() => playedSoFar(features, currentTimestamp), [features, currentTimestamp]);
-  const pathCoords = useMemo(() => scopedTimePath(features, currentTimestamp), [features, currentTimestamp]);
-  const flowWindow = useMemo(() => scopedWindow(features, currentTimestamp), [features, currentTimestamp]);
+  // One chain per event family, and only for the families a link line is
+  // meaningful for — see `scopedLinkGroups`. The straight lines and the road
+  // corridors are two renderings of exactly the same grouping.
+  const linkGroups = useMemo(
+    () => scopedLinkGroups(features, currentTimestamp),
+    [features, currentTimestamp],
+  );
+  const timePaths = useMemo(
+    () => scopedTimePaths(features, currentTimestamp),
+    [features, currentTimestamp],
+  );
   const {
     legs: flowLegs,
     unavailable: flowUnavailable,
     reason: flowReason,
-  } = useFlowLegs(flowWindow, flowCorridorsEnabled);
+  } = useFlowLegs(linkGroups, flowCorridorsEnabled);
   const clusters = useMemo(() => districtClusters(features, currentTimestamp), [features, currentTimestamp]);
   const density = useMemo(
     () => densityScore(features, currentTimestamp, data.totalDistrictsInScope),
@@ -229,7 +238,7 @@ export default function EventsWorkspace({
               onPlayingChange={setPlaying}
               onHoverFeature={setHoveredId}
               onSelectFeature={setSelectedId}
-              timePath={pathCoords}
+              timePaths={timePaths}
               clusters={clusters.map((c) => ({ lng: c.lng, lat: c.lat, tier: c.tier, label: c.district }))}
               flowLegs={flowLegs}
               flowCorridorsEnabled={flowCorridorsEnabled}

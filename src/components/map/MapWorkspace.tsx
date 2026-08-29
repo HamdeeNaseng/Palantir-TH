@@ -24,7 +24,7 @@ import {
   IconTimeline,
 } from "@tabler/icons-react";
 import { AREA_DENSITY_SCALE } from "@/lib/palette";
-import { scopedWindow } from "@/lib/events-replay";
+import { scopedLinkGroups } from "@/lib/events-replay";
 import { useFlowLegs } from "@/lib/flow/use-flow-legs";
 import {
   FLOW_CORRIDOR_LAYER,
@@ -289,24 +289,24 @@ export default function MapWorkspace({
   }, [showDots, showFlowCorridors, events, eventsQuery]);
 
   /**
-   * The most recent events in the filtered set, chronologically — the same
-   * "recent movement" window `/events` draws, anchored to the latest matched
-   * event rather than to a playhead, because this page has no scrubber. The
-   * fetched collection is not guaranteed sorted, and `scopedWindow`'s binary
-   * search requires it.
+   * The most recent events in the filtered set, chronologically and grouped by
+   * family — the same "recent movement" window `/events` draws, anchored to
+   * the latest matched event rather than to a playhead, because this page has
+   * no scrubber. The fetched collection is not guaranteed sorted, and
+   * `scopedLinkGroups`' binary search requires it.
    */
-  const flowWindow = useMemo(() => {
+  const linkGroups = useMemo(() => {
     if (!showFlowCorridors || !events) return [];
     const sorted = [...events.features].sort((a, b) => a.properties.ts - b.properties.ts);
     const latest = sorted.at(-1);
-    return latest ? scopedWindow(sorted, latest.properties.ts) : [];
+    return latest ? scopedLinkGroups(sorted, latest.properties.ts) : [];
   }, [showFlowCorridors, events]);
 
   const {
     legs: flowLegs,
     unavailable: flowUnavailable,
     reason: flowReason,
-  } = useFlowLegs(flowWindow, showFlowCorridors);
+  } = useFlowLegs(linkGroups, showFlowCorridors);
 
   const flowLegsData = useMemo(() => toFlowFeatureCollection(flowLegs), [flowLegs]);
 
@@ -642,7 +642,7 @@ export default function MapWorkspace({
             title={
               flowReason
                 ? FLOW_UNAVAILABLE_LABEL[flowReason]
-                : "เส้นทางบนโครงข่ายถนนจริงระหว่างเหตุการณ์ล่าสุด (ทดลอง)"
+                : "เส้นทางบนโครงข่ายถนนจริงระหว่างเหตุการณ์ล่าสุดในกลุ่มเดียวกัน — เหตุรุนแรง กิจกรรมกลุ่ม ยาเสพติด อาชญากรรม (ทดลอง)"
             }
           />
           <Toggle

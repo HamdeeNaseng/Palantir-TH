@@ -5,6 +5,12 @@ import type { LayerProps } from "react-map-gl/maplibre";
 import { EVENT_ICON } from "./event-icons";
 import { EVENT_COLOR } from "./palette";
 import { EVENT_TYPES, type EventType } from "./types";
+import {
+  addBadgeImages,
+  buildBadgeImages,
+  BADGE_GLYPH,
+  type BadgeImage,
+} from "./map-badges";
 
 /**
  * Type glyphs drawn on the map itself, above the event dots.
@@ -20,36 +26,20 @@ import { EVENT_TYPES, type EventType } from "./types";
  * than stacked: at province zoom the dots are 4px across and hundreds deep, so
  * a glyph per dot there would be noise covering the very pattern the heatmap
  * and the dot field are there to show.
+ *
+ * The rasterising mechanism is shared with `/network`'s facility badges — see
+ * `map-badges.tsx`.
  */
 
 /** `icon-image` ids are `${prefix}${EventType}`, built by the layer expression. */
 const IMAGE_PREFIX = "event-badge-";
 
-/**
- * Badge geometry, in CSS pixels — `SCALE` is baked into the rasterised image
- * and handed back to MapLibre as `pixelRatio`, so the glyph stays sharp on a
- * HiDPI display instead of being upscaled from a 20px bitmap.
- */
-const PLATE = 20;
-const GLYPH = 13;
-const SCALE = 2;
-
-/** The panel background the rest of the UI uses, so a badge reads as chrome. */
-const PLATE_FILL = "rgba(6,13,25,0.88)";
-
 /** Below this the dots are a few pixels across and a glyph per dot is noise. */
 export const EVENT_BADGE_MIN_ZOOM = 10.5;
 
-/**
- * Every type glyph, rendered by React but never shown.
- *
- * MapLibre needs raster images, and the glyphs are Lucide *components* — the
- * path data is closed over inside them and is not reachable as data. Rather
- * than copy 17 icons' geometry into this repo (where it would silently drift
- * from `EVENT_ICON`), the components are rendered once into a hidden node and
- * `registerEventBadgeIcons` serialises what React produced. `EVENT_ICON` stays
- * the single definition of which glyph means what.
- */
+export type EventBadgeImage = BadgeImage;
+
+/** Every type glyph, rendered by React but never shown — see `buildBadgeImages`. */
 export function EventBadgeSprite({ ref }: { ref: React.Ref<HTMLDivElement> }) {
   return (
     <div ref={ref} hidden aria-hidden>
@@ -59,7 +49,7 @@ export function EventBadgeSprite({ ref }: { ref: React.Ref<HTMLDivElement> }) {
           <Glyph
             key={type}
             data-event-type={type}
-            size={GLYPH}
+            size={BADGE_GLYPH}
             strokeWidth={2.2}
             color={EVENT_COLOR[type]}
           />
@@ -69,67 +59,17 @@ export function EventBadgeSprite({ ref }: { ref: React.Ref<HTMLDivElement> }) {
   );
 }
 
-/** One badge: a dark rounded plate outlined in the type's colour, glyph centred. */
-function badgeMarkup(glyph: SVGSVGElement, color: string): string {
-  const inner = glyph.cloneNode(true) as SVGSVGElement;
-  // Nested `<svg>`, positioned by x/y/width/height against the outer viewBox.
-  // The class Lucide puts on it is dead weight inside a data: URI.
-  inner.removeAttribute("class");
-  inner.setAttribute("x", String((PLATE - GLYPH) / 2));
-  inner.setAttribute("y", String((PLATE - GLYPH) / 2));
-  inner.setAttribute("width", String(GLYPH));
-  inner.setAttribute("height", String(GLYPH));
-
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${PLATE * SCALE}" height="${PLATE * SCALE}" viewBox="0 0 ${PLATE} ${PLATE}">`,
-    `<rect x="0.5" y="0.5" width="${PLATE - 1}" height="${PLATE - 1}" rx="5" fill="${PLATE_FILL}" stroke="${color}" stroke-opacity="0.75" stroke-width="1"/>`,
-    new XMLSerializer().serializeToString(inner),
-    `</svg>`,
-  ].join("");
-}
-
-function loadImage(markup: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image(PLATE * SCALE, PLATE * SCALE);
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("badge image failed to decode"));
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
-  });
-}
-
-export interface EventBadgeImage {
-  id: string;
-  image: HTMLImageElement;
-}
-
-/**
- * Rasterises the sprite. Deliberately takes no map: decoding is asynchronous,
- * and a function that both awaits and then writes to a map instance is a
- * function that can write to one the caller has already unmounted. The caller
- * awaits this, checks it still wants the result, and only then calls
- * `addEventBadgeImages`.
- */
 export function buildEventBadgeImages(container: HTMLElement): Promise<EventBadgeImage[]> {
-  const glyphs = Array.from(container.querySelectorAll<SVGSVGElement>("svg[data-event-type]"));
-
-  return Promise.all(
-    glyphs.map(async (glyph) => {
-      const type = glyph.dataset.eventType as EventType;
-      const markup = badgeMarkup(glyph, EVENT_COLOR[type] ?? EVENT_COLOR.other);
-      return { id: `${IMAGE_PREFIX}${type}`, image: await loadImage(markup) };
-    }),
+  return buildBadgeImages(
+    container,
+    "eventType",
+    IMAGE_PREFIX,
+    (key) => EVENT_COLOR[key as EventType] ?? EVENT_COLOR.other,
   );
 }
 
-/**
- * Adds the rasterised badges to a map's image registry. Already-registered ids
- * are skipped, so a second call — React re-running the effect, or a style
- * reload — is cheap rather than an error.
- */
 export function addEventBadgeImages(map: MapLibreMap, badges: EventBadgeImage[]): void {
-  for (const { id, image } of badges) {
-    if (!map.hasImage(id)) map.addImage(id, image, { pixelRatio: SCALE });
-  }
+  addBadgeImages(map, badges);
 }
 
 /**

@@ -10,10 +10,10 @@ import {
 import NavTabs, { type NavTab } from "./NavTabs";
 
 const TABS: NavTab[] = [
+  { href: "/report", label: "รายงาน" },
   { href: "/investigate", label: "สืบสวน" },
   { href: "/events", label: "เหตุการณ์" },
   { href: "/cases", label: "เคส" },
-  { href: "/report", label: "รายงาน" },
   { href: "/network", label: "เครือข่าย" },
   { href: "/map", label: "แผนที่" },
   { href: "/sources", label: "แหล่งข้อมูล" },
@@ -39,7 +39,7 @@ export default function TopNav({ active }: { active: string }) {
         </button>
 
         <Link
-          href="/investigate"
+          href="/report"
           className="shrink-0 text-[16px] font-semibold tracking-tight text-ink"
         >
           Palantir <span className="text-azure">TH</span>

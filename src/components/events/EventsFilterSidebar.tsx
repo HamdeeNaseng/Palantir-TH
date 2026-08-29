@@ -1,9 +1,10 @@
 "use client";
 
-import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
+import { IconCalendar } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
+import { Check, Section, SectionAction, toggle } from "@/components/filters/FilterSection";
+import EventTypeFilter, { countsByType } from "@/components/filters/EventTypeFilter";
 import { PROVINCES } from "@/lib/geo";
-import { EVENT_ICON } from "@/lib/event-icons";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
@@ -12,75 +13,22 @@ import {
 import { fromInputDateTime, toInputDateTime } from "@/lib/datetime";
 import { useFilterDraft } from "@/lib/use-filter-draft";
 import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
-import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
+import type { ProvinceCode, VerificationStatus } from "@/lib/types";
 
 /**
- * Filters for `/events` — the same `InvestigationFilters` URL grammar and
- * Section/Check markup `/investigate`'s sidebar uses (that file doesn't
- * export them, and they're ~40 lines of pure presentation, not worth a
- * cross-page dependency to share), plus facet counts from the server and a
- * new, NOT URL-persisted "การตั้งค่าการเล่น" section — the playhead is
- * ephemeral session state, not a filter.
+ * Filters for `/events` — the same `InvestigationFilters` URL grammar, and now
+ * literally the same parts `/investigate`'s sidebar is built from: `Section`,
+ * `Check` and the "ประเภทเหตุ" chip grid all live in `@/components/filters`,
+ * so the one filter a reader meets on both tabs cannot drift between them
+ * again. What stays local to this page is the facet counts it feeds those
+ * parts and the NOT URL-persisted "การตั้งค่าการเล่น" section — the playhead
+ * is ephemeral session state, not a filter.
  *
  * Applying no longer navigates. `onApply` hands the selection to
  * `EventsWorkspace`, which re-derives the page from the dataset already in the
  * browser; the URL still updates, but through the History API rather than a
  * round trip. See `@/lib/use-local-filters`.
  */
-
-function toggle<T>(list: T[], value: T): T[] {
-  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-}
-
-function Section({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border-b border-[rgba(37,66,102,0.45)] px-3.5 py-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[12px] font-medium text-ink-dim">{title}</h3>
-        <div className="flex items-center gap-1.5">
-          {action}
-          <IconChevronDown size={13} stroke={2} className="text-ink-muted" />
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Check({
-  checked,
-  onChange,
-  label,
-  count,
-}: {
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-  count?: number;
-}) {
-  return (
-    <label className="filter-row">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        className="filter-box"
-      />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count !== undefined && (
-        <span className="num shrink-0 text-[10.5px] text-ink-muted">{count.toLocaleString("en-US")}</span>
-      )}
-    </label>
-  );
-}
 
 export default function EventsFilterSidebar({
   initial,
@@ -162,13 +110,9 @@ export default function EventsFilterSidebar({
         <Section
           title="จังหวัด"
           action={
-            <button
-              type="button"
-              onClick={() => patch({ provinces: PROVINCES.map((p) => p.code) })}
-              className="rounded border border-[rgba(56,100,150,0.5)] px-1.5 py-0.5 text-[10px] text-ink-muted hover:text-ink"
-            >
+            <SectionAction onClick={() => patch({ provinces: PROVINCES.map((p) => p.code) })}>
               เลือกทั้งหมด
-            </button>
+            </SectionAction>
           }
         >
           {facets.provinces.map((p) => (
@@ -182,44 +126,11 @@ export default function EventsFilterSidebar({
           ))}
         </Section>
 
-        {facets.eventTypes.length > 0 && (
-          <Section
-            title="ประเภทเหตุการณ์"
-            action={
-              <button
-                type="button"
-                onClick={() => patch({ eventTypes: [] })}
-                className="rounded border border-[rgba(56,100,150,0.5)] px-1.5 py-0.5 text-[10px] text-ink-muted hover:text-ink"
-              >
-                เลือกทั้งหมด
-              </button>
-            }
-          >
-            <div className="flex flex-wrap gap-1.5">
-              {facets.eventTypes.map((t) => {
-                const on = f.eventTypes.includes(t.value);
-                const Icon = EVENT_ICON[t.value] ?? EVENT_ICON.other;
-                return (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => patch({ eventTypes: toggle<EventType>(f.eventTypes, t.value) })}
-                    className="chip"
-                    style={{
-                      color: t.color,
-                      borderColor: on ? t.color : `${t.color}55`,
-                      background: on ? `${t.color}26` : "transparent",
-                    }}
-                  >
-                    <Icon size={12} strokeWidth={2} className="shrink-0" aria-hidden />
-                    {t.label}
-                    <span className="num opacity-70">{t.n.toLocaleString("en-US")}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </Section>
-        )}
+        <EventTypeFilter
+          selected={f.eventTypes}
+          onChange={(eventTypes) => patch({ eventTypes })}
+          counts={countsByType(facets.eventTypes)}
+        />
 
         <Section title="สถานะการยืนยัน">
           {facets.verification.map((v) => (

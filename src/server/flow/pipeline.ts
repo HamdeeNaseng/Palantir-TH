@@ -19,21 +19,26 @@ export type FlowResult =
   /** The road graph has not been fetched — `npm run gis:roads`. */
   | { ok: false; reason: "no-road-data" };
 
-export function computeFlowLegs(points: TimedPoint[]): FlowResult {
+/**
+ * Several independent chains in one pass — one per event family, since a
+ * corridor between two events of different families asserts a movement nobody
+ * claimed. The graph is loaded once for all of them; each sequence is chained
+ * strictly within itself.
+ */
+export function computeFlowSequences(sequences: TimedPoint[][]): FlowResult {
   const graph = loadRoadGraph();
   if (!graph) return { ok: false, reason: "no-road-data" };
 
+  return { ok: true, legs: sequences.flatMap((points) => legsOfSequence(graph, points)) };
+}
+
+function legsOfSequence(graph: RoadGraph, points: TimedPoint[]): (FlowLeg | null)[] {
   const sorted = [...points].sort((a, b) => a.tsMs - b.tsMs);
-  if (sorted.length < 2) return { ok: true, legs: [] };
+  if (sorted.length < 2) return [];
 
   const snaps = sorted.map((p) => snapToRoad(graph, p));
 
-  return {
-    ok: true,
-    legs: sorted
-      .slice(1)
-      .map((to, i) => computeLeg(graph, sorted[i], snaps[i], to, snaps[i + 1])),
-  };
+  return sorted.slice(1).map((to, i) => computeLeg(graph, sorted[i], snaps[i], to, snaps[i + 1]));
 }
 
 /**

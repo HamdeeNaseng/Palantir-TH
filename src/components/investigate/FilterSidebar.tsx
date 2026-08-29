@@ -2,87 +2,23 @@
 
 import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
+import { Check, Section, SectionAction, toggle } from "@/components/filters/FilterSection";
+import EventTypeFilter from "@/components/filters/EventTypeFilter";
 import { PROVINCES } from "@/lib/geo";
-import { EVENT_COLOR } from "@/lib/palette";
-import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
-import { EVENT_FAMILY_ICON, EVENT_ICON } from "@/lib/event-icons";
 import { useFilterDraft } from "@/lib/use-filter-draft";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
   type InvestigationFilters,
 } from "@/lib/filters";
-import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
 import type { SourceFacet } from "@/lib/view-models/investigate";
-import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
-
-/**
- * Every category, grouped by family. Derived from the vocabulary rather than
- * listed here: this used to be a second, hand-kept copy of the labels, and it
- * had already drifted from `EVENT_TYPE_LABEL` in two places before the list
- * grew to seventeen.
- */
-const EVENT_TYPE_GROUPS = EVENT_FAMILIES.map((family) => ({
-  family,
-  label: EVENT_FAMILY_LABEL[family],
-  Icon: EVENT_FAMILY_ICON[family],
-  types: typesInFamily(family),
-}));
+import type { ProvinceCode, VerificationStatus } from "@/lib/types";
 
 const VERIFICATION_OPTIONS: { value: VerificationStatus; label: string }[] = [
   { value: "verified", label: "ยืนยันแล้ว" },
   { value: "under_review", label: "อยู่ระหว่างตรวจสอบ" },
   { value: "unverifiable", label: "ยังไม่สามารถยืนยันได้" },
 ];
-
-function toggle<T>(list: T[], value: T): T[] {
-  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-}
-
-function Section({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border-b border-[rgba(37,66,102,0.45)] px-3.5 py-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[12px] font-medium text-ink-dim">{title}</h3>
-        <div className="flex items-center gap-1.5">
-          {action}
-          <IconChevronDown size={13} stroke={2} className="text-ink-muted" />
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Check({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-}) {
-  return (
-    <label className="filter-row">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        className="filter-box"
-      />
-      {label}
-    </label>
-  );
-}
 
 /**
  * Applying no longer navigates: `onApply` hands the selection to
@@ -158,13 +94,9 @@ export default function FilterSidebar({
         <Section
           title="จังหวัด"
           action={
-            <button
-              type="button"
-              onClick={() => patch({ provinces: PROVINCES.map((p) => p.code) })}
-              className="rounded border border-[rgba(56,100,150,0.5)] px-1.5 py-0.5 text-[10px] text-ink-muted hover:text-ink"
-            >
+            <SectionAction onClick={() => patch({ provinces: PROVINCES.map((p) => p.code) })}>
               เลือกทั้งหมด
-            </button>
+            </SectionAction>
           }
         >
           {PROVINCES.map((p) => (
@@ -182,52 +114,10 @@ export default function FilterSidebar({
           />
         </Section>
 
-        <Section
-          title="ประเภทเหตุ"
-          action={
-            <button
-              type="button"
-              onClick={() => patch({ eventTypes: [] })}
-              className="rounded border border-[rgba(56,100,150,0.5)] px-1.5 py-0.5 text-[10px] text-ink-muted hover:text-ink"
-            >
-              เลือกทั้งหมด
-            </button>
-          }
-        >
-          <div className="flex flex-wrap gap-1.5">
-            {EVENT_TYPE_GROUPS.map((g) => (
-              <div key={g.family} className="w-full">
-                <p className="mt-1 mb-1 flex items-center gap-1 text-[10px] text-ink-muted first:mt-0">
-                  <g.Icon size={11} strokeWidth={2} className="shrink-0" aria-hidden />
-                  {g.label}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {g.types.map((t) => {
-                    const on = f.eventTypes.includes(t);
-                    const color = EVENT_COLOR[t];
-                    const Icon = EVENT_ICON[t];
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => patch({ eventTypes: toggle<EventType>(f.eventTypes, t) })}
-                        className="chip min-h-9 px-3 text-[12.5px] lg:min-h-0 lg:px-2 lg:text-[11px]"
-                        style={{
-                          color,
-                          borderColor: on ? color : `${color}55`,
-                          background: on ? `${color}26` : "transparent",
-                        }}
-                      >
-                        <Icon size={12} strokeWidth={2} className="shrink-0" aria-hidden />
-                        {EVENT_TYPE_LABEL[t]}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Section>
+        <EventTypeFilter
+          selected={f.eventTypes}
+          onChange={(eventTypes) => patch({ eventTypes })}
+        />
 
         <Section title="สถานะการยืนยัน">
           {VERIFICATION_OPTIONS.map((v) => (

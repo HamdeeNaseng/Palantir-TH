@@ -1,21 +1,24 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { computeFlowLegs } from "@/server/flow/pipeline";
+import { computeFlowSequences } from "@/server/flow/pipeline";
 
 export const dynamic = "force-dynamic";
 
+const pointSchema = z.object({
+  id: z.string(),
+  lng: z.number(),
+  lat: z.number(),
+  tsMs: z.number(),
+  geoPrecisionM: z.number(),
+});
+
+/**
+ * One sequence per event family, never one flat list: legs are chained inside
+ * a sequence and never across two, which is what keeps a corridor from being
+ * drawn between events of different families.
+ */
 const requestSchema = z.object({
-  points: z
-    .array(
-      z.object({
-        id: z.string(),
-        lng: z.number(),
-        lat: z.number(),
-        tsMs: z.number(),
-        geoPrecisionM: z.number(),
-      }),
-    )
-    .min(2),
+  sequences: z.array(z.array(pointSchema).min(2)).min(1),
 });
 
 /**
@@ -24,7 +27,8 @@ const requestSchema = z.object({
  *
  * The client already holds each event's coordinates and timestamp (they came
  * from the server as part of the page's own event features), so this takes
- * the points directly rather than re-querying Mongo by id.
+ * the points directly rather than re-querying Mongo by id — grouped into the
+ * per-family sequences the caller wants chained.
  *
  * Routing runs in-process against the graph built by
  * `scripts/fetch-roads.ts`. With that file absent this reports the layer
@@ -37,7 +41,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid request body" }, { status: 400 });
   }
 
-  const result = computeFlowLegs(parsed.data.points);
+  const result = computeFlowSequences(parsed.data.sequences);
 
   if (!result.ok) {
     return NextResponse.json(

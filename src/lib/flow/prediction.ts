@@ -4,7 +4,7 @@ import type { Position } from "@/lib/geography";
  * Domain types for the Bayesian route-prediction model built by `ml-server/`.
  *
  * Distinct from `./types.ts`, which describes the in-process P0 pipeline
- * (`computeFlowLegs`) — that one answers "what road path connects these two
+ * (`computeFlowSequences`) — that one answers "what road path connects these two
  * events", per request, from event coordinates the client already holds. This
  * one answers "which corridors does the corpus as a whole implicate, and where
  * is activity likely next", precomputed by a batch job.

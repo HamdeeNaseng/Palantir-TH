@@ -13,6 +13,7 @@
     "gis:fetch": "tsx scripts/fetch-boundaries.ts",
     "gis:villages": "tsx scripts/fetch-villages.ts",
     "gis:roads": "tsx scripts/fetch-roads.ts",
+    "gis:facilities": "tsx scripts/fetch-facilities.ts",
     "gis:validate": "node scripts/validate-boundaries.mjs && tsx scripts/validate-events.ts",
     "gis:boundaries": "npm run gis:fetch && npm run gis:validate",
     "check": "npm run check:env && npm run gis:validate && npm run typecheck && npm run build",

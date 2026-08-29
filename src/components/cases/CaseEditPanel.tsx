@@ -7,7 +7,7 @@ import CaseLocationMap from "./CaseLocationMap";
 import { saveCaseCorrection } from "@/server/case-corrections";
 import { EVENT_TYPE_LABEL, GEO_PRECISION_LABEL, SEVERITY_LABEL, VERIFICATION_LABEL } from "@/lib/labels";
 import { EVENT_COLOR } from "@/lib/palette";
-import { EVENT_TYPES, GEO_PRECISION_RADIUS_M } from "@/lib/types";
+import { asGeoPrecision, EVENT_TYPES, GEO_PRECISION_RADIUS_M } from "@/lib/types";
 import { formatThaiDateTime } from "@/lib/datetime";
 import type {
   CaseCorrectionChanges,
@@ -72,7 +72,7 @@ export default function CaseEditPanel({
   const [form, setForm] = useState({
     lng: coordinates?.[0] ?? null,
     lat: coordinates?.[1] ?? null,
-    precision: event.location.geo_precision ?? "unknown",
+    precision: asGeoPrecision(event.location.geo_precision),
     type: event.event.type,
     severity: event.severity,
     verification: event.verification,

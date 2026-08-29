@@ -84,6 +84,19 @@ export const COLLECTIONS = {
   caseCorrections: "case_corrections",
 
   /**
+   * The response network on `/network`.
+   *
+   * `facilities` holds only what an analyst added by hand; the OSM-derived
+   * ones live in `public/data/south-facilities.geojson` and are never copied
+   * in here, so re-running the fetch cannot silently overwrite local
+   * knowledge. `facility_log` is append-only and carries both kinds of entry
+   * an operations desk produces — a status change and a coordination call —
+   * because "who said it was closed, and when" is the same question for both.
+   */
+  facilities: "facilities",
+  facilityLog: "facility_log",
+
+  /**
    * Output of the Bayesian route-prediction batch in `ml-server/`. Written
    * only by `python run_batch.py`; this app reads them and never writes.
    *

@@ -34,7 +34,7 @@ import type { Position } from "@/lib/geography";
  *
  * Every function returns `null` rather than throwing when the model is absent.
  * A fresh clone has never run the batch, and that must leave the map working
- * with the layer switched off — the same contract `computeFlowLegs` has for a
+ * with the layer switched off — the same contract `computeFlowSequences` has for a
  * missing road graph. The distinction the caller needs is *why*, which is what
  * `PredictionUnavailableReason` carries: "nobody has run the batch" and "the
  * database is down" want different words on screen.

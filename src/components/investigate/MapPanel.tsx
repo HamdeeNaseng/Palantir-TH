@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Map, {
   AttributionControl,
   Layer,
@@ -20,11 +21,12 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
+  IconChevronRight,
   IconRoute,
   IconSatellite,
   IconStack2,
 } from "@tabler/icons-react";
-import { EVENT_COLOR } from "@/lib/palette";
+import { EVENT_COLOR, EVENT_FAMILY_COLOR } from "@/lib/palette";
 import { EVENT_FAMILY_ICON, EVENT_ICON, MAP_LAYER_ICON } from "@/lib/event-icons";
 import {
   addEventBadgeImages,
@@ -32,6 +34,7 @@ import {
   EVENT_BADGE_LAYER,
   EventBadgeSprite,
 } from "@/lib/map-event-icons";
+import type { LinkableFamily } from "@/lib/events-replay";
 import type { FlowLeg } from "@/lib/flow/types";
 import {
   FLOW_CORRIDOR_LAYER,
@@ -133,6 +136,18 @@ const LEGEND = EVENT_FAMILIES.map((family) => ({
     Icon: EVENT_ICON[t],
   })),
 }));
+
+/**
+ * Where a dot goes when it is clicked.
+ *
+ * The canonical detail route is plural (`/cases/<id>`); `/case/<id>` exists as
+ * an alias and only redirects here, so linking straight at the canonical form
+ * saves the round trip. The id is the event candidate's `_id` — the same key
+ * `getCaseDetail` reads — carried on every feature as `properties.id`.
+ */
+function caseHref(id: string): string {
+  return `/cases/${encodeURIComponent(id)}`;
+}
 
 const VIEWS = ["แผนที่", "ความหนาแน่น", "ไฮบริด"] as const;
 type View = (typeof VIEWS)[number];
@@ -322,11 +337,28 @@ const POINT_LAYER = {
   },
 } satisfies LayerProps;
 
+/**
+ * Coloured by family, from the same `EVENT_FAMILY_COLOR` the trend chart uses:
+ * with four separate chains on screen at once, one shared cyan would read as a
+ * single tangled path rather than four independent ones.
+ */
 const TIME_PATH_LAYER = {
   id: "time-path-line",
   type: "line",
   paint: {
-    "line-color": "#38bdf8",
+    "line-color": [
+      "match",
+      ["get", "family"],
+      "violence",
+      EVENT_FAMILY_COLOR.violence,
+      "gang",
+      EVENT_FAMILY_COLOR.gang,
+      "narcotics",
+      EVENT_FAMILY_COLOR.narcotics,
+      "crime",
+      EVENT_FAMILY_COLOR.crime,
+      "#38bdf8",
+    ] as ExpressionSpecification,
     "line-width": 1.6,
     "line-dasharray": [2, 1.6],
     "line-opacity": 0.85,
@@ -431,8 +463,11 @@ interface MapPanelProps {
   onHoverFeature?: (id: string | null) => void;
   /** Fires on click of a point. */
   onSelectFeature?: (id: string | null) => void;
-  /** A short, already-scoped recent-movement line — see `scopedTimePath`. */
-  timePath?: [number, number][];
+  /**
+   * The short, already-scoped recent-movement lines — one per event family,
+   * never one chain across families. See `scopedTimePaths`.
+   */
+  timePaths?: { family: LinkableFamily; coordinates: [number, number][] }[];
   /** Statistically-significant district clusters — see `districtClusters`. */
   clusters?: MapCluster[];
   /**
@@ -457,7 +492,7 @@ export default function MapPanel({
   onPlayingChange,
   onHoverFeature,
   onSelectFeature,
-  timePath,
+  timePaths,
   clusters,
   flowLegs,
   flowCorridorsEnabled,
@@ -465,6 +500,7 @@ export default function MapPanel({
   flowUnavailable,
   flowReason,
 }: MapPanelProps) {
+  const router = useRouter();
   const mapRef = useRef<MapRef | null>(null);
   const [view, setView] = useState<View>("ไฮบริด");
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
@@ -530,11 +566,14 @@ export default function MapPanel({
 
   const timePathData = useMemo(
     () => ({
-      type: "Feature" as const,
-      geometry: { type: "LineString" as const, coordinates: timePath ?? [] },
-      properties: {},
+      type: "FeatureCollection" as const,
+      features: (timePaths ?? []).map((path) => ({
+        type: "Feature" as const,
+        geometry: { type: "LineString" as const, coordinates: path.coordinates },
+        properties: { family: path.family },
+      })),
     }),
-    [timePath],
+    [timePaths],
   );
 
   const flowLegsData = useMemo(() => toFlowFeatureCollection(flowLegs ?? []), [flowLegs]);
@@ -594,6 +633,15 @@ export default function MapPanel({
 
       onSelectFeature?.(point ? String(point.properties.id) : null);
 
+      // A dot is the case, so clicking it opens the case. The popup can't
+      // carry the link itself: it is driven by hover, and moving the pointer
+      // off the dot to reach it takes the pointer off the canvas, which closes
+      // it — the map's own click is the only reachable target.
+      if (point) {
+        router.push(caseHref(String(point.properties.id)));
+        return;
+      }
+
       if (province) {
         const props = province.properties as Record<string, string>;
         setBoundary({
@@ -605,7 +653,7 @@ export default function MapPanel({
         });
       }
     },
-    [onSelectFeature],
+    [onSelectFeature, router],
   );
 
   /**
@@ -788,7 +836,7 @@ export default function MapPanel({
         {/* Rendered only when a parent actually supplies these —
             `/investigate`'s plain usage never creates them, so its map is
             unchanged. */}
-        {timePath !== undefined && (
+        {timePaths !== undefined && (
           <Source id="time-path" type="geojson" data={timePathData}>
             <Layer {...TIME_PATH_LAYER} />
           </Source>
@@ -832,6 +880,10 @@ export default function MapPanel({
             <div className="pp-row">
               <span>ความละเอียดพิกัด</span>
               <b>{PRECISION_LABEL[String(hover.props.precision)] ?? "ไม่ระบุ"}</b>
+            </div>
+            <div className="pp-action">
+              คลิกเพื่อเปิดหน้าเคส
+              <IconChevronRight size={11} stroke={2.2} aria-hidden />
             </div>
           </Popup>
         )}
@@ -934,7 +986,7 @@ export default function MapPanel({
                     <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
                       {flowReason
                         ? FLOW_UNAVAILABLE_LABEL[flowReason]
-                        : "คำนวณเส้นทางบนโครงข่ายถนนจริงจากข้อมูล OSM (ทดลอง)"}
+                        : "คำนวณเส้นทางบนโครงข่ายถนนจริงจากข้อมูล OSM เชื่อมเฉพาะเหตุในกลุ่มเดียวกัน (ทดลอง)"}
                     </span>
                   </span>
                 </label>
@@ -1148,7 +1200,10 @@ function PopupType({ type }: { type: EventType }) {
   const Icon = EVENT_ICON[type] ?? EVENT_ICON.other;
   const color = EVENT_COLOR[type] ?? EVENT_COLOR.other;
   return (
-    <div className="pp-meta flex items-center gap-1.5" style={{ color }}>
+    <div
+      className="pp-meta pp-type flex items-center gap-1.5"
+      style={{ "--pp-type-color": color } as React.CSSProperties}
+    >
       <Icon size={11} strokeWidth={2} className="shrink-0" aria-hidden />
       {EVENT_TYPE_LABEL[type] ?? type}
     </div>
