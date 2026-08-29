@@ -1,0 +1,16 @@
+# Batch + API runtime for the Bayesian route-prediction model.
+#
+# Pinned to the versions the model was developed and validated against in
+# notebook/Bayesian Route Prediction.ipynb. numpy/pandas/scipy carry the
+# numerics; changing them silently changes the posteriors, so they are pinned
+# rather than floated.
+numpy==2.3.0
+pandas==2.3.0
+scipy==1.15.3
+pymongo==4.17.0
+python-dotenv==1.1.0
+
+# API only. The batch job runs without these.
+fastapi==0.136.3
+uvicorn[standard]==0.38.0
+pydantic==2.12.3

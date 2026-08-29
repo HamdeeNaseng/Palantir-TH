@@ -21,6 +21,7 @@ import {
   IconRoute,
   IconSatellite,
   IconStack2,
+  IconTimeline,
 } from "@tabler/icons-react";
 import { AREA_DENSITY_SCALE } from "@/lib/palette";
 import { scopedWindow } from "@/lib/events-replay";
@@ -32,6 +33,17 @@ import {
   registerFlowArrowIcon,
   toFlowFeatureCollection,
 } from "@/lib/flow/map-layers";
+import {
+  PREDICTION_ANCHOR_HIT_LAYER,
+  PREDICTION_ANCHOR_LAYER,
+  PREDICTION_CORRIDOR_HIT_LAYER,
+  PREDICTION_CORRIDOR_LAYER,
+  PREDICTION_SEGMENT_LAYER,
+  PREDICTION_SELECTED_LAYER,
+  PREDICTION_UNAVAILABLE_LABEL,
+} from "@/lib/flow/prediction-layers";
+import { useAnchorDetail, usePrediction } from "@/lib/flow/use-prediction";
+import PredictionPanel from "./PredictionPanel";
 import {
   SATELLITE_SOURCE_ID,
   SATELLITE_DEFAULT_ON,
@@ -232,6 +244,14 @@ export default function MapWorkspace({
   const [showAreas, setShowAreas] = useState(true);
   const [showDots, setShowDots] = useState(false);
   const [showFlowCorridors, setShowFlowCorridors] = useState(false);
+  /**
+   * The two precomputed layers from the Bayesian model in `ml-server/`. Both
+   * off by default and independent: the corridor layer is a claim about pairs
+   * of districts, the segment layer is a summary over every pair, and reading
+   * one on top of the other is usually reading neither.
+   */
+  const [showPrediction, setShowPrediction] = useState(false);
+  const [showSegments, setShowSegments] = useState(false);
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<AreaPopup | null>(null);
@@ -290,6 +310,21 @@ export default function MapWorkspace({
 
   const flowLegsData = useMemo(() => toFlowFeatureCollection(flowLegs), [flowLegs]);
 
+  /**
+   * The precomputed model, read out of MongoDB by `/api/flow/prediction`.
+   * Fetched once, the first time either layer is switched on — it only changes
+   * when the batch promotes a new run.
+   */
+  const wantsPrediction = showPrediction || showSegments;
+  const { bundle: prediction, reason: predictionReason } = usePrediction(wantsPrediction);
+  const predictionUnavailable = predictionReason !== null;
+  const {
+    detail: anchorDetail,
+    loading: anchorLoading,
+    select: selectAnchor,
+    selectedId: selectedAnchorId,
+  } = useAnchorDetail();
+
   const level: AreaLevel =
     manualLevel === "auto"
       ? (AUTO_BREAKS.find((b) => zoom >= b.minZoom)?.level ?? "province")
@@ -317,6 +352,18 @@ export default function MapWorkspace({
     [fillColor, showAreas],
   );
 
+  /**
+   * Anchor first, so it wins the hit test against the choropleth it sits on.
+   * MapLibre returns features in layer order, and `handleClick` reads that
+   * order as priority.
+   */
+  const interactiveLayerIds = useMemo(() => {
+    const ids: string[] = [];
+    if (showPrediction && prediction) ids.push(PREDICTION_ANCHOR_HIT_LAYER.id);
+    if (showAreas) ids.push("area-density");
+    return ids;
+  }, [showAreas, showPrediction, prediction]);
+
   const applySatellite = useCallback((next: boolean) => {
     const map = mapRef.current?.getMap();
     if (map) setSatelliteBasemap(map, next, SATELLITE_FILLS);
@@ -325,6 +372,20 @@ export default function MapWorkspace({
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
+      // The anchor is tested before the choropleth beneath it: a click that
+      // lands on both is a click on the smaller, deliberately-aimed target.
+      const anchor = e.features?.find(
+        (feature) => feature.layer.id === PREDICTION_ANCHOR_HIT_LAYER.id,
+      );
+      if (anchor) {
+        const id = String((anchor.properties as Record<string, unknown>).anchor_id ?? "");
+        if (id) {
+          selectAnchor(id === selectedAnchorId ? null : id);
+          setPopup(null);
+          return;
+        }
+      }
+
       const f = e.features?.find((feature) => feature.layer.id === "area-density");
       if (!f) {
         setPopup(null);
@@ -401,8 +462,8 @@ export default function MapWorkspace({
         style={{ width: "100%", height: "100%" }}
         attributionControl={false}
         dragRotate={false}
-        interactiveLayerIds={showAreas ? ["area-density"] : []}
-        cursor={showAreas ? "pointer" : undefined}
+        interactiveLayerIds={interactiveLayerIds}
+        cursor={interactiveLayerIds.length > 0 ? "pointer" : undefined}
         onLoad={(e) => {
           setReady(true);
           e.target.fitBounds(BOUNDS, { padding: fitPadding(), duration: 0 });
@@ -457,6 +518,36 @@ export default function MapWorkspace({
           </Source>
         )}
 
+        {/* Model output, drawn beneath the event dots: it is a summary of the
+            corpus, and the dots are the corpus. */}
+        {showSegments && prediction && (
+          <Source id="prediction-segments" type="geojson" data={prediction.segments}>
+            <Layer {...PREDICTION_SEGMENT_LAYER} />
+          </Source>
+        )}
+
+        {showPrediction && prediction && (
+          <>
+            <Source id="prediction-corridors" type="geojson" data={prediction.corridors}>
+              <Layer {...PREDICTION_CORRIDOR_LAYER} />
+              <Layer {...PREDICTION_CORRIDOR_HIT_LAYER} />
+            </Source>
+
+            {/* The selected anchor's own corridors, including the alternatives
+                the overview layer leaves out. */}
+            {anchorDetail && (
+              <Source id="prediction-selected" type="geojson" data={anchorDetail.corridors}>
+                <Layer {...PREDICTION_SELECTED_LAYER} />
+              </Source>
+            )}
+
+            <Source id="prediction-anchors" type="geojson" data={prediction.anchors}>
+              <Layer {...PREDICTION_ANCHOR_LAYER} />
+              <Layer {...PREDICTION_ANCHOR_HIT_LAYER} />
+            </Source>
+          </>
+        )}
+
         {popup && (
           <Popup
             longitude={popup.lng}
@@ -480,12 +571,15 @@ export default function MapWorkspace({
 
       <div className="pointer-events-none absolute inset-0">
         {/* Level + layers */}
-        <div className="pointer-events-auto absolute top-2.5 left-2 w-[178px] lg:left-3">
+        {/* Above the reading rail: on a phone the open controls card and the
+            bottom sheet occupy the same band, and without this the sheet — later
+            in the DOM — paints over the layer list the reader just opened. */}
+        <div className="pointer-events-auto absolute top-2.5 left-2 z-10 flex w-[178px] flex-col gap-1.5 lg:left-3">
           <button
             type="button"
             onClick={() => setControlsOpen((v) => !v)}
             aria-expanded={controlsOpen}
-            className="mb-1 flex min-h-10 w-full items-center gap-1.5 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 text-[12.5px] text-ink-dim lg:hidden"
+            className="flex min-h-10 w-full items-center gap-1.5 rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] px-2.5 text-[12.5px] text-ink-dim lg:hidden"
           >
             <IconStack2 size={15} stroke={1.7} />
             ตัวเลือกแผนที่
@@ -552,6 +646,30 @@ export default function MapWorkspace({
             }
           />
           <Toggle
+            checked={showPrediction && !predictionUnavailable}
+            onChange={() => setShowPrediction((v) => !v)}
+            label="ช่องทางคาดการณ์ (Bayesian)"
+            icon={<IconRoute size={12} stroke={1.7} />}
+            disabled={predictionUnavailable}
+            title={
+              predictionReason
+                ? PREDICTION_UNAVAILABLE_LABEL[predictionReason]
+                : "ช่องทางที่เหตุการณ์เชื่อมโยงกันตามถนน คำนวณล่วงหน้าจากทั้งคลังข้อมูล"
+            }
+          />
+          <Toggle
+            checked={showSegments && !predictionUnavailable}
+            onChange={() => setShowSegments((v) => !v)}
+            label="ความถี่การใช้ถนน"
+            icon={<IconTimeline size={12} stroke={1.7} />}
+            disabled={predictionUnavailable}
+            title={
+              predictionReason
+                ? PREDICTION_UNAVAILABLE_LABEL[predictionReason]
+                : "ถนนเส้นที่ถูกเชื่อมโยงซ้ำบ่อยที่สุด ถ่วงด้วย posterior ของแต่ละช่องทาง"
+            }
+          />
+          <Toggle
             checked={satellite}
             onChange={() => applySatellite(!satellite)}
             label="ภาพถ่ายดาวเทียม"
@@ -607,10 +725,30 @@ export default function MapWorkspace({
           </button>
         </div>
 
-        {/* Ranked areas — a right rail beside the map on a wide screen, a
-            bottom sheet under it on a phone, where vertical space is the only
-            space there is. */}
-        <div className="pointer-events-auto absolute inset-x-2 bottom-9 flex max-h-[42vh] flex-col rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] lg:inset-x-auto lg:top-2.5 lg:right-2.5 lg:bottom-auto lg:max-h-[calc(100%-1.25rem)] lg:w-[254px]">
+        {/* The reading rail: ranked areas, and the model panel under them when
+            it is on. Both belong on this side — the left column is controls,
+            and it has no room for a panel once the layer list is in it. The
+            ranked list yields the height, because it scrolls and the model
+            panel does not. */}
+        <div
+          className={`pointer-events-auto absolute inset-x-2 flex flex-col gap-1.5 overflow-hidden lg:inset-x-auto lg:top-2.5 lg:right-2.5 lg:bottom-auto lg:max-h-[calc(100%-1.25rem)] lg:w-[254px] ${
+            // With the model panel in it the sheet has to grow, and it has to
+            // clear MapLibre's attribution — which wraps to two lines on a
+            // narrow screen. At 42vh and `bottom-9` the panel's caveat is the
+            // first thing lost, and that is the one thing that must not be.
+            wantsPrediction && prediction
+              ? "bottom-16 max-h-[68vh] lg:bottom-auto"
+              : "bottom-9 max-h-[42vh]"
+          }`}
+        >
+        {/* Collapsed on a phone, this is just its own header, so it must not
+            claim the sheet's free space — the panel below needs it. At `lg` the
+            list is always open and takes the slack instead. */}
+        <div
+          className={`flex flex-col rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.9)] lg:min-h-0 lg:flex-1 ${
+            rankedOpen ? "min-h-0 flex-1" : "shrink-0"
+          }`}
+        >
           <div className="flex items-center gap-2 border-b border-[rgba(37,66,102,0.6)] px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="text-[11.5px] font-semibold text-ink">
@@ -704,6 +842,16 @@ export default function MapWorkspace({
               พื้นที่ที่ไม่มีเหตุการณ์จะไม่ถูกระบายสี
             </p>
           </div>
+        </div>
+
+        {wantsPrediction && prediction && (
+          <PredictionPanel
+            bundle={prediction}
+            forecast={anchorDetail?.forecast ?? null}
+            forecastLoading={anchorLoading}
+            onClearSelection={() => selectAnchor(null)}
+          />
+        )}
         </div>
 
         {/* Provenance + what is not on the map */}
