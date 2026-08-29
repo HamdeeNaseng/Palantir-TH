@@ -36,11 +36,17 @@ export default function InvestigateWorkspace({
   /** Decided on the server: `process.env` is not readable from here. */
   isLocalDev: boolean;
 }) {
+  // `local` is what lets the sidebar drop its apply button: once the dataset
+  // is in hand a filter change costs one pass over it, so there is no reason
+  // to make the analyst commit a batch of changes before seeing any of them.
+  // Until then the button is still the only safe way to spend a round trip.
   const {
     view: data,
     apply,
+    applyLive,
     reset,
     pending,
+    local,
     snapshot,
   } = useLocalFilters<InvestigationDashboard>({
     path: "/investigate",
@@ -56,7 +62,8 @@ export default function InvestigateWorkspace({
       <FilterSidebar
         initial={data.filters}
         sources={data.facets.sources}
-        onApply={apply}
+        onApply={local ? applyLive : apply}
+        live={local}
         onReset={reset}
         pending={pending}
         footerNote={<SnapshotStatusNote snapshot={snapshot} />}

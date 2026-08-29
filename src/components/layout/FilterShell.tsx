@@ -7,6 +7,13 @@ import { IconFilter, IconLoader2, IconX } from "@tabler/icons-react";
  * The chrome every filter sidebar in the console shares: a title row with a
  * reset, a scrolling body, and an "ใช้ตัวกรอง" footer.
  *
+ * `live` drops that footer button on desktop: a sidebar that applies each
+ * change as it is made has nothing left for it to do, and a button that
+ * re-submits what is already on screen invites the reading that until you
+ * press it, what you are looking at is stale. On a phone it stays — the drawer
+ * covers the results it is filtering, so there has to be one obvious way back
+ * to them — and says so ("ดูผลลัพธ์") instead of claiming to apply anything.
+ *
  * Below `lg` the same panel becomes an off-canvas drawer opened from a bar
  * above the content. That is the only place 190–212 px of permanent controls
  * can go on a phone — `/cases` and `/report` previously answered the question
@@ -25,6 +32,7 @@ export default function FilterShell({
   resetLabel,
   onReset,
   onApply,
+  live = false,
   pending = false,
   activeCount = 0,
   width = "lg:w-[188px]",
@@ -35,6 +43,8 @@ export default function FilterShell({
   resetLabel: string;
   onReset: () => void;
   onApply: () => void;
+  /** True when the sidebar applies each change itself, with no button press. */
+  live?: boolean;
   pending?: boolean;
   /** How many filters are narrowing the view, shown on the closed trigger. */
   activeCount?: number;
@@ -78,7 +88,9 @@ export default function FilterShell({
   const closed = !desktop && !open;
 
   const apply = () => {
-    onApply();
+    // In live mode the filters are already applied; this is only "close the
+    // drawer and look at them".
+    if (!live) onApply();
     setOpen(false);
   };
 
@@ -166,14 +178,17 @@ export default function FilterShell({
             type="button"
             onClick={apply}
             disabled={pending}
-            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#1d4ed8] text-[13.5px] font-medium text-white transition-colors hover:bg-[#2563eb] disabled:opacity-70 lg:min-h-0 lg:rounded lg:py-2 lg:text-[12.5px]"
+            className={[
+              "flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#1d4ed8] text-[13.5px] font-medium text-white transition-colors hover:bg-[#2563eb] disabled:opacity-70 lg:min-h-0 lg:rounded lg:py-2 lg:text-[12.5px]",
+              live ? "lg:hidden" : "",
+            ].join(" ")}
           >
             {pending ? (
               <IconLoader2 size={14} stroke={2} className="animate-spin" />
             ) : (
               <IconFilter size={14} stroke={1.8} />
             )}
-            ใช้ตัวกรอง
+            {live ? "ดูผลลัพธ์" : "ใช้ตัวกรอง"}
           </button>
         </div>
       </aside>

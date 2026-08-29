@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
 import { EVENT_COLOR } from "@/lib/palette";
 import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
 import { EVENT_FAMILY_ICON, EVENT_ICON } from "@/lib/event-icons";
+import { useFilterDraft } from "@/lib/use-filter-draft";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
@@ -93,6 +93,7 @@ export default function FilterSidebar({
   initial,
   sources,
   onApply,
+  live = false,
   onReset,
   pending = false,
   footerNote,
@@ -101,27 +102,18 @@ export default function FilterSidebar({
   /** From `source_registry`, with counts — never a hand-written list. */
   sources: SourceFacet[];
   onApply: (filters: InvestigationFilters) => void;
+  /** Applies each change as it is made — see `useFilterDraft`. */
+  live?: boolean;
   onReset: () => void;
   pending?: boolean;
   footerNote?: React.ReactNode;
 }) {
-  const [f, setF] = useState<InvestigationFilters>(initial);
-
-  // Back, Forward, or a fallback navigation changed the applied filters
-  // elsewhere; the draft in the sidebar follows rather than silently
-  // contradicting the dashboard beside it.
-  useEffect(() => {
-    setF(initial);
-  }, [initial]);
-
-  const patch = (next: Partial<InvestigationFilters>) => setF((prev) => ({ ...prev, ...next }));
-
-  const apply = () => onApply(f);
-
-  const reset = () => {
-    setF(DEFAULT_FILTERS);
-    onReset();
-  };
+  const { filters: f, patch, apply, reset } = useFilterDraft({
+    initial,
+    live,
+    onApply,
+    onReset,
+  });
 
   // What the closed drawer reports on a phone: how far this view has been
   // narrowed away from the defaults, not how many boxes happen to be ticked.
@@ -139,6 +131,7 @@ export default function FilterSidebar({
       resetLabel="ล้างตัวกรอง"
       onReset={reset}
       onApply={apply}
+      live={live}
       pending={pending}
       activeCount={activeCount}
       footerNote={footerNote}

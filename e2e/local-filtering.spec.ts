@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
  *
  * This is the one claim no other check can reach. `tsc` proves the builders
  * type-check and the same functions run on both sides, but only a real browser
- * can show that clicking "ใช้ตัวกรอง" issues no request, that the dataset
+ * can show that ticking a filter box issues no request, that the dataset
  * survives in IndexedDB, and that Back still walks filter history now that the
  * URL is driven by the History API instead of the router.
  */
@@ -27,6 +27,18 @@ async function waitForLocalDataset(page: Page) {
   await expect(page.getByText("กรองจากข้อมูลในเครื่อง")).toBeVisible({ timeout: 60_000 });
 }
 
+/**
+ * The imagery credit MapLibre adds once the satellite source has loaded.
+ *
+ * It lands inside `main` on its own schedule, so a whole-page text baseline
+ * taken before it appears can never equal one taken after — a test that then
+ * fails on tile latency rather than on anything it set out to check. Waiting
+ * for it puts the map's asynchronous half on both sides of the comparison.
+ */
+async function waitForMapAttribution(page: Page) {
+  await expect(page.getByText(/Esri|MapTiler/).first()).toBeVisible({ timeout: 30_000 });
+}
+
 function sidebar(page: Page) {
   return page
     .locator('aside[aria-label="ตัวกรอง"], aside[aria-label="ตัวกรองเหตุการณ์"]')
@@ -40,6 +52,19 @@ async function untickProvince(page: Page, name: string) {
     .first()
     .locator("input")
     .click();
+}
+
+/**
+ * Both analyst consoles apply each change as it is made, with no button
+ * between — see `useFilterDraft`. Asserted rather than assumed below: a
+ * sidebar that quietly went back to batching would still pass every other
+ * check in this file.
+ */
+async function expectNoApplyButton(page: Page) {
+  await expect(
+    page.getByRole("button", { name: "ใช้ตัวกรอง" }),
+    "a live sidebar must not also offer a button that claims to apply",
+  ).toHaveCount(0);
 }
 
 for (const path of ["/investigate", "/events"]) {
@@ -60,9 +85,10 @@ for (const path of ["/investigate", "/events"]) {
       if (isData && !isPrefetch) fetches.push(`${r.resourceType()} ${url}`);
     });
 
+    await waitForMapAttribution(page);
     const before = await page.locator("main").innerText();
     await untickProvince(page, "ปัตตานี");
-    await page.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
+    await expectNoApplyButton(page);
 
     // The dashboard has to actually change — a filter that quietly does
     // nothing would also issue no requests.
@@ -117,9 +143,9 @@ test("Back walks filter history without going to the server", async ({ page }) =
   await page.goto("/investigate");
   await waitForLocalDataset(page);
 
+  await waitForMapAttribution(page);
   const unfiltered = await page.locator("main").innerText();
   await untickProvince(page, "ปัตตานี");
-  await page.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
   await expect.poll(() => page.locator("main").innerText(), { timeout: 30_000 }).not.toBe(unfiltered);
 
   await page.goBack();
@@ -158,7 +184,6 @@ test("every source option filters to exactly the count it advertises", async ({ 
 
   const busiest = options.reduce((a, b) => (b.n > a.n ? b : a));
   await select.selectOption(busiest.value);
-  await page.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
 
   await expect
     .poll(
@@ -246,7 +271,6 @@ test("an outage snapshot in the cache cannot displace real data", async ({ page 
 
   // Filtering still narrows the data rather than answering from nothing.
   await untickProvince(page, "ปัตตานี");
-  await page.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
   await expect.poll(total, { timeout: 30_000 }).not.toBe(real);
   expect(await total()).not.toBe("0");
 });

@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
@@ -11,6 +10,7 @@ import {
   type InvestigationFilters,
 } from "@/lib/filters";
 import { fromInputDateTime, toInputDateTime } from "@/lib/datetime";
+import { useFilterDraft } from "@/lib/use-filter-draft";
 import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
 import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
 
@@ -86,6 +86,7 @@ export default function EventsFilterSidebar({
   initial,
   facets,
   onApply,
+  live = false,
   onReset,
   pending = false,
   footerNote,
@@ -100,6 +101,8 @@ export default function EventsFilterSidebar({
   initial: InvestigationFilters;
   facets: EventsWorkspaceData["facets"];
   onApply: (filters: InvestigationFilters) => void;
+  /** Applies each change as it is made — see `useFilterDraft`. */
+  live?: boolean;
   onReset: () => void;
   pending?: boolean;
   footerNote?: React.ReactNode;
@@ -111,23 +114,12 @@ export default function EventsFilterSidebar({
   autoPlay: boolean;
   onAutoPlayChange: (v: boolean) => void;
 }) {
-  const [f, setF] = useState<InvestigationFilters>(initial);
-
-  // Back, Forward, or a fallback navigation changed the applied filters
-  // elsewhere; the draft in the sidebar follows rather than silently
-  // contradicting the page beside it.
-  useEffect(() => {
-    setF(initial);
-  }, [initial]);
-
-  const patch = (next: Partial<InvestigationFilters>) => setF((prev) => ({ ...prev, ...next }));
-
-  const apply = () => onApply(f);
-
-  const reset = () => {
-    setF(DEFAULT_FILTERS);
-    onReset();
-  };
+  const { filters: f, patch, apply, reset } = useFilterDraft({
+    initial,
+    live,
+    onApply,
+    onReset,
+  });
 
   const activeCount =
     (f.range !== DEFAULT_FILTERS.range ? 1 : 0) +
@@ -143,6 +135,7 @@ export default function EventsFilterSidebar({
       resetLabel="รีเซ็ต"
       onReset={reset}
       onApply={apply}
+      live={live}
       pending={pending}
       activeCount={activeCount}
       footerNote={footerNote}
