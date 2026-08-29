@@ -18,7 +18,28 @@ import {
   scopedWindow,
 } from "@/lib/events-replay";
 import { useFlowLegs } from "@/lib/flow/use-flow-legs";
-import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
+import SnapshotStatusNote from "@/components/layout/SnapshotStatusNote";
+import { useLocalFilters } from "@/lib/use-local-filters";
+import { buildEventsWorkspace } from "@/lib/view-models/events";
+import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
+
+/**
+ * Replay pacing at 1x. The full window is walked in `PLAYBACK_FRAMES` ticks of
+ * `PLAYBACK_TICK_MS`, so a whole span takes about a minute at 1x and the 2x/4x
+ * buttons cut that to ~29s and ~14s. The earlier 240 frames at 80ms crossed
+ * years of events in 19 seconds — and in practice faster still, since
+ * `MapPanel` was running a second interval over the same playhead (now guarded
+ * by `isControlled` there). Either way it was quicker than the map, the
+ * cluster rings and the trend band could be read, which is the only reason to
+ * watch a replay rather than a static map.
+ *
+ * `MIN_PLAYBACK_STEP_MS` keeps the playhead moving perceptibly on a short
+ * window, where `span / PLAYBACK_FRAMES` would otherwise be a few seconds of
+ * event time per tick; at 15 minutes a single day still takes ~11s to walk.
+ */
+const PLAYBACK_FRAMES = 480;
+const PLAYBACK_TICK_MS = 120;
+const MIN_PLAYBACK_STEP_MS = 900000;
 
 /**
  * The state owner for `/events`.
@@ -35,7 +56,33 @@ import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
  * see `src/lib/events-replay.ts` for why this stays client-side instead of a
  * server round trip per scrub tick.
  */
-export default function EventsWorkspace({ data }: { data: EventsWorkspaceData }) {
+export default function EventsWorkspace({
+  initial,
+  snapshotVersion,
+  snapshotBuiltAtMs,
+}: {
+  initial: EventsWorkspaceData;
+  snapshotVersion: string;
+  snapshotBuiltAtMs: number;
+}) {
+  // The server rendered `initial` for the URL's filters. From here on, every
+  // filter change is answered from the snapshot in IndexedDB — same builder,
+  // no navigation, no MongoDB read. `data` is whichever of the two is current.
+  const {
+    view: data,
+    apply,
+    reset,
+    pending,
+    snapshot,
+  } = useLocalFilters<EventsWorkspaceData>({
+    path: "/events",
+    initialFilters: initial.filters,
+    initialView: initial,
+    initialVersion: snapshotVersion,
+    initialBuiltAtMs: snapshotBuiltAtMs,
+    build: (snap, filters) => buildEventsWorkspace(snap, filters, Date.now()),
+  });
+
   const features = data.events.features;
 
   const [currentTimestamp, setCurrentTimestamp] = useState(data.span?.endMs ?? Date.now());
@@ -48,22 +95,33 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flowCorridorsEnabled, setFlowCorridorsEnabled] = useState(false);
 
-  // A fresh filter selection ships a brand-new `data` (different span, event
-  // set) — resync the playback window rather than carrying over a timestamp
-  // that may no longer even fall inside the new span.
+  // A fresh filter selection covers a different span — resync the playback
+  // window rather than carrying over a timestamp that may no longer even fall
+  // inside it.
+  //
+  // Keyed on the span rather than on `data` identity: the five-minute snapshot
+  // refresh rebuilds `data` on its own schedule, and resetting the playhead
+  // mid-replay because a background sync happened to land is not something the
+  // person watching it asked for. A refresh that genuinely extends the record
+  // does move the span, and that one does resync.
+  const spanStartMs = data.span?.startMs;
+  const spanEndMs = data.span?.endMs;
   useEffect(() => {
-    setCurrentTimestamp(data.span?.endMs ?? Date.now());
-    setPlaybackStartMs(data.span?.startMs ?? Date.now());
-    setPlaybackEndMs(data.span?.endMs ?? Date.now());
+    setCurrentTimestamp(spanEndMs ?? Date.now());
+    setPlaybackStartMs(spanStartMs ?? Date.now());
+    setPlaybackEndMs(spanEndMs ?? Date.now());
     setPlaying(autoPlay);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [spanStartMs, spanEndMs]);
 
   // Playback tick — same shape as MapPanel's own uncontrolled timer, lifted
   // here since this is now the single source of truth for the playhead.
   useEffect(() => {
     if (!playing || playbackEndMs <= playbackStartMs) return;
-    const baseStep = Math.max(3600000, Math.ceil((playbackEndMs - playbackStartMs) / 240));
+    const baseStep = Math.max(
+      MIN_PLAYBACK_STEP_MS,
+      Math.ceil((playbackEndMs - playbackStartMs) / PLAYBACK_FRAMES),
+    );
     const step = baseStep * speed;
     const timer = window.setInterval(() => {
       setCurrentTimestamp((t) => {
@@ -73,7 +131,7 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
         }
         return Math.min(playbackEndMs, t + step);
       });
-    }, 80);
+    }, PLAYBACK_TICK_MS);
     return () => window.clearInterval(timer);
   }, [playing, playbackStartMs, playbackEndMs, speed]);
 
@@ -90,7 +148,7 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
     () => densityScore(features, currentTimestamp, data.totalDistrictsInScope),
     [features, currentTimestamp, data.totalDistrictsInScope],
   );
-  const phenomena = useMemo(() => phenomenaSummary(features, currentTimestamp), [features, currentTimestamp]);
+  const phenomena = useMemo(() => phenomenaSummary(clusters), [clusters]);
 
   const inspectFeature = useMemo(() => {
     const byId = hoveredId ?? selectedId;
@@ -106,6 +164,10 @@ export default function EventsWorkspace({ data }: { data: EventsWorkspaceData })
       <EventsFilterSidebar
         initial={data.filters}
         facets={data.facets}
+        onApply={apply}
+        onReset={reset}
+        pending={pending}
+        footerNote={<SnapshotStatusNote snapshot={snapshot} />}
         playbackStartMs={playbackStartMs}
         playbackEndMs={playbackEndMs}
         spanStartMs={data.span?.startMs ?? playbackStartMs}

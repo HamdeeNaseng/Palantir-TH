@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
@@ -10,10 +9,10 @@ import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
-  serializeFilters,
   type InvestigationFilters,
 } from "@/lib/filters";
 import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
+import type { SourceFacet } from "@/lib/view-models/investigate";
 import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
 
 /**
@@ -83,20 +82,43 @@ function Check({
   );
 }
 
-export default function FilterSidebar({ initial }: { initial: InvestigationFilters }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+/**
+ * Applying no longer navigates: `onApply` hands the selection to
+ * `InvestigateWorkspace`, which rebuilds the dashboard from the dataset
+ * already cached in the browser. See `@/lib/use-local-filters`.
+ */
+export default function FilterSidebar({
+  initial,
+  sources,
+  onApply,
+  onReset,
+  pending = false,
+  footerNote,
+}: {
+  initial: InvestigationFilters;
+  /** From `source_registry`, with counts — never a hand-written list. */
+  sources: SourceFacet[];
+  onApply: (filters: InvestigationFilters) => void;
+  onReset: () => void;
+  pending?: boolean;
+  footerNote?: React.ReactNode;
+}) {
   const [f, setF] = useState<InvestigationFilters>(initial);
+
+  // Back, Forward, or a fallback navigation changed the applied filters
+  // elsewhere; the draft in the sidebar follows rather than silently
+  // contradicting the dashboard beside it.
+  useEffect(() => {
+    setF(initial);
+  }, [initial]);
 
   const patch = (next: Partial<InvestigationFilters>) => setF((prev) => ({ ...prev, ...next }));
 
-  const apply = () => {
-    startTransition(() => router.push(`/investigate?${serializeFilters(f)}`, { scroll: false }));
-  };
+  const apply = () => onApply(f);
 
   const reset = () => {
     setF(DEFAULT_FILTERS);
-    startTransition(() => router.push("/investigate", { scroll: false }));
+    onReset();
   };
 
   // What the closed drawer reports on a phone: how far this view has been
@@ -117,6 +139,7 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
       onApply={apply}
       pending={pending}
       activeCount={activeCount}
+      footerNote={footerNote}
     >
         <Section title="ช่วงเวลา">
           <div className="overflow-hidden rounded border border-[rgba(37,66,102,0.6)]">
@@ -227,13 +250,16 @@ export default function FilterSidebar({ initial }: { initial: InvestigationFilte
               className="min-h-11 w-full appearance-none rounded border border-[rgba(37,66,102,0.7)] bg-[#0a1524] px-2.5 py-1.5 text-[16px] text-ink-dim focus:border-azure focus:outline-none lg:min-h-0 lg:text-[12px]"
             >
               <option value="all">ทั้งหมด</option>
-              <option value="src_dsi_wcid">DSI-WCID</option>
-              <option value="src_acled">ACLED</option>
-              <option value="src_ucdp">UCDP GED</option>
-              <option value="src_isoc4">กอ.รมน.ภาค 4 สน.</option>
-              <option value="src_local_news">ข่าวท้องถิ่น</option>
-              <option value="src_thaipbs">Thai PBS</option>
-              <option value="src_citizen">รายงานประชาชน</option>
+              {/* Straight from `source_registry`, with the count each one
+                  would match. The seven ids hard-coded here before had drifted
+                  so far that every single option filtered the page to zero:
+                  five of them are not in the registry at all, and the other
+                  two are on no event. */}
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label} ({s.n.toLocaleString("en-US")})
+                </option>
+              ))}
             </select>
             <IconChevronDown
               size={13}

@@ -28,6 +28,7 @@ export default function FilterShell({
   pending = false,
   activeCount = 0,
   width = "lg:w-[188px]",
+  footerNote,
   children,
 }: {
   title: string;
@@ -39,6 +40,8 @@ export default function FilterShell({
   activeCount?: number;
   /** Desktop width as a Tailwind class, since the sidebars differ by 24 px. */
   width?: string;
+  /** Small print above the apply button — where the data came from, and when. */
+  footerNote?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -158,6 +161,7 @@ export default function FilterShell({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
 
         <div className="pb-safe border-t border-[rgba(37,66,102,0.55)] p-3 lg:pb-3">
+          {footerNote}
           <button
             type="button"
             onClick={apply}

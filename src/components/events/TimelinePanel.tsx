@@ -7,7 +7,7 @@ import {
   IconPlayerPlay,
 } from "@tabler/icons-react";
 import { formatThaiDate } from "@/lib/datetime";
-import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
+import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
 
 /**
  * The dedicated replay scrubber — a histogram of the full matched span with a

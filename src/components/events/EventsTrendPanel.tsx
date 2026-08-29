@@ -1,6 +1,6 @@
 import AnomalyLine from "@/components/charts/AnomalyLine";
 import { rollingMean } from "@/lib/stats";
-import type { EventsWorkspace as EventsWorkspaceData } from "@/server/events";
+import type { EventsWorkspace as EventsWorkspaceData } from "@/lib/view-models/events";
 
 /** How far back "ช่วงที่กำลังเล่น" reaches from the playhead, in buckets of history. */
 const HIGHLIGHT_LOOKBACK_MS = 180 * 86400000;

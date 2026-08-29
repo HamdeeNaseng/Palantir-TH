@@ -1,4 +1,4 @@
-import { detectHotspots } from "./stats";
+import { detectHotspotsFromCounts, tallyHotspot, type HotspotCounts } from "./stats";
 import type { EventFeature } from "@/server/shared-events";
 
 /**
@@ -84,11 +84,36 @@ export interface DistrictCluster {
   lat: number;
   /** Signed percent above the expected recent count. */
   delta: number;
+  /** Raw Poisson upper-tail p-value. */
   p: number;
+  /** False-discovery-corrected p-value — what `tier` is graded on. */
+  q: number;
+  /** Length of the "recently" this cluster was measured over, in whole days. */
+  recentDays: number;
   tier: "high" | "medium";
 }
 
-const CLUSTER_OPTIONS = { recentDays: 180, baselineDays: 540, minBaseline: 5, limit: 12 };
+/**
+ * The recent-against-baseline split used to detect a cluster, as a fraction of
+ * the span actually played so far.
+ *
+ * This used to be a fixed 180-day recent window against a 540-day baseline,
+ * which silently made the whole layer dead for most filter selections: the
+ * sidebar's ranges top out at 90 days, so every played event fell inside the
+ * 180-day "recent" window, the baseline was empty, and `detectHotspots`
+ * correctly returned nothing — no circles on the map, unchanged no matter what
+ * was filtered. The other end was no better: across the full 2545-onward
+ * record, 180 days is the last ~2% of the span, so a district had to spike
+ * inside a window narrower than the histogram's own buckets to register.
+ *
+ * Scaling both windows off the played span instead means "recently" always
+ * means the last quarter of what is on screen, and the baseline is the three
+ * quarters before it, at every zoom from a day to two decades.
+ */
+const CLUSTER_RECENT_FRACTION = 0.25;
+/** A window this short cannot hold a baseline; below it, no cluster is claimed. */
+const CLUSTER_MIN_SPAN_MS = 4 * 86400000;
+const CLUSTER_OPTIONS = { minBaseline: 5, limit: 12 };
 
 /**
  * Districts whose played-so-far volume is significantly above what the
@@ -115,40 +140,62 @@ export function districtClusters(
   const played = playedSoFar(features, currentTimestampMs);
   if (played.length === 0) return [];
 
-  const byKey = new Map<string, { district: string; province: string; lngs: number[]; lats: number[] }>();
+  // Measured from the first played event rather than from the filter's own
+  // span, so the windows track what the playhead has actually revealed — early
+  // in a replay that is a few weeks even when the filter covers twenty years.
+  const playedSpanMs = currentTimestampMs - played[0].properties.ts;
+  if (playedSpanMs < CLUSTER_MIN_SPAN_MS) return [];
+  const recentDays = (playedSpanMs * CLUSTER_RECENT_FRACTION) / 86400000;
+  const baselineDays = playedSpanMs / 86400000 - recentDays;
+
+  // One pass, because this is the hot loop of the whole page: it runs on every
+  // playhead tick — eight times a second during playback — over every event
+  // played so far. It used to walk `played` three times (coordinates, then a
+  // 9,659-object `HotspotItem[]`, then the tally inside `detectHotspots`) and
+  // build the same district key twice per event. Accumulating coordinate sums
+  // and hotspot counts together drops that to one walk, one key, and no
+  // intermediate array — see `tallyHotspot` in `@/lib/stats`.
+  const byKey = new Map<
+    string,
+    { district: string; province: string; lngSum: number; latSum: number; n: number }
+  >();
+  const counts: HotspotCounts = new Map();
   for (const f of played) {
     const key = `${f.properties.province}|${f.properties.district}`;
-    const entry = byKey.get(key) ?? {
-      district: f.properties.district,
-      province: f.properties.province,
-      lngs: [],
-      lats: [],
-    };
-    entry.lngs.push(f.geometry.coordinates[0]);
-    entry.lats.push(f.geometry.coordinates[1]);
-    byKey.set(key, entry);
+    const entry = byKey.get(key);
+    if (entry) {
+      entry.lngSum += f.geometry.coordinates[0];
+      entry.latSum += f.geometry.coordinates[1];
+      entry.n += 1;
+    } else {
+      byKey.set(key, {
+        district: f.properties.district,
+        province: f.properties.province,
+        lngSum: f.geometry.coordinates[0],
+        latSum: f.geometry.coordinates[1],
+        n: 1,
+      });
+    }
+    tallyHotspot(counts, key, currentTimestampMs - f.properties.ts, recentDays, baselineDays);
   }
 
-  const { hotspots } = detectHotspots(
-    played.map((f) => ({ key: `${f.properties.province}|${f.properties.district}`, atMs: f.properties.ts })),
-    currentTimestampMs,
-    CLUSTER_OPTIONS,
-  );
+  const { hotspots } = detectHotspotsFromCounts(counts, CLUSTER_OPTIONS);
 
   return hotspots
     .map((h): DistrictCluster | null => {
       const entry = byKey.get(h.label);
       if (!entry) return null;
-      const n = entry.lngs.length;
       return {
         key: h.label,
         district: entry.district,
         province: entry.province,
-        lng: entry.lngs.reduce((s, v) => s + v, 0) / n,
-        lat: entry.lats.reduce((s, v) => s + v, 0) / n,
+        lng: entry.lngSum / entry.n,
+        lat: entry.latSum / entry.n,
         delta: h.delta,
         p: h.p,
-        tier: h.p < 0.01 ? "high" : "medium",
+        q: h.q,
+        recentDays: Math.max(1, Math.round(recentDays)),
+        tier: h.q < 0.01 ? "high" : "medium",
       };
     })
     .filter((c): c is DistrictCluster => c !== null);
@@ -207,18 +254,33 @@ export interface PhenomenonInsight {
 }
 
 /**
+ * "N วันล่าสุด" in Thai, rolled up once a day count stops being readable as
+ * one. The cluster window scales with the played span, so on the full record
+ * it lands near 2,200 days — a number no one parses as "about six years".
+ */
+function windowLabel(days: number): string {
+  if (days < 60) return `${Math.max(1, Math.round(days))} วัน`;
+  if (days < 730) return `${Math.round(days / 30)} เดือน`;
+  return `${(days / 365.25).toFixed(1)} ปี`;
+}
+
+/**
  * Plain factual sentences built directly from `districtClusters` — never a
  * fabricated narrative. `insights: []` is the honest, expected answer when
  * nothing in the current window clears statistical significance.
+ *
+ * Takes the clusters rather than recomputing them: the caller already has the
+ * same list for the map's rings, and `districtClusters` is the most expensive
+ * thing on the playhead's path — a Poisson scan of every played event, per
+ * district, per tick. Running it twice per frame was doubling the cost of
+ * playback for two renderings of one answer.
  */
-export function phenomenaSummary(
-  features: EventFeature[],
-  currentTimestampMs: number,
-): { insights: PhenomenonInsight[] } {
-  const clusters = districtClusters(features, currentTimestampMs);
+export function phenomenaSummary(clusters: DistrictCluster[]): { insights: PhenomenonInsight[] } {
   const insights = clusters.slice(0, 4).map((c) => ({
     id: c.key,
-    text: `อ.${c.district} จ.${c.province} มีเหตุการณ์มากกว่าค่าคาดการณ์ ${c.delta}% ในช่วง ${CLUSTER_OPTIONS.recentDays} วันล่าสุด (p<${c.tier === "high" ? "0.01" : "0.05"})`,
+    // The window is the one this cluster was actually measured over — it
+    // scales with the played span now, so a constant here would misreport it.
+    text: `อ.${c.district} จ.${c.province} มีเหตุการณ์มากกว่าค่าคาดการณ์ ${c.delta}% ในช่วง ${windowLabel(c.recentDays)}ล่าสุด (q<${c.tier === "high" ? "0.01" : "0.05"})`,
     tone: c.tier === "high" ? ("warning" as const) : ("info" as const),
   }));
   return { insights };

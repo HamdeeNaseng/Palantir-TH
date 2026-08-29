@@ -62,12 +62,14 @@ src/
 │   ├── events/page.tsx          เหตุการณ์ — ไทม์ไลน์เล่นย้อนหลัง (server component, อ่าน searchParams)
 │   ├── map/page.tsx             แผนที่ภาพรวม — ความหนาแน่นรายจังหวัด/อำเภอ/ตำบล ตามระดับซูม
 │   ├── api/map/events/route.ts  จุดเหตุการณ์สำหรับ /map (ดึงเมื่อเปิดชั้นจุดเท่านั้น ~6 MB)
+│   ├── api/snapshot/route.ts    ชุดข้อมูลทั้งก้อนสำหรับ cache ในเบราว์เซอร์ (gzip 372 KB / br 251 KB, ETag + 304)
 │   ├── (stub)/…                 แท็บอื่นในแถบนำทาง ยังไม่ได้สร้าง
 │   └── globals.css              design tokens (Tailwind v4 @theme)
 ├── components/
 │   ├── layout/TopNav.tsx
-│   ├── investigate/             FilterSidebar, KpiRow, MidPanels, CitizenSignalPanel,
-│   │                            CaseRail, MapPanel (ใช้ร่วมกับ /events ผ่าน controlled props)
+│   ├── investigate/             InvestigateWorkspace (state owner), FilterSidebar, KpiRow,
+│   │                            MidPanels, CitizenSignalPanel, CaseRail,
+│   │                            MapPanel (ใช้ร่วมกับ /events ผ่าน controlled props)
 │   ├── cases/                   CaseFilterSidebar, CaseSearchBar, CaseTable,
 │   │                            CasePagination, CaseLocationMap, MediaThumb —
 │   │                            ใช้ร่วมกับ /cases และ /report ผ่าน prop `basePath`
@@ -87,6 +89,11 @@ src/
 │   ├── basemap.ts               ชั้นภาพถ่ายดาวเทียม (ปิดอยู่ตั้งแต่แรก ตั้งค่าผ่าน env)
 │   ├── stats.ts                 Poisson/bucketing แบบ isomorphic — ใช้ทั้งฝั่ง server และ client
 │   ├── events-replay.ts         สถิติที่ขึ้นกับตำแหน่ง playhead (client-side, ไม่ round-trip ทุก tick)
+│   ├── snapshot.ts              shape ของ snapshot + filter ladder ฝั่ง client (isomorphic)
+│   ├── snapshot-cache.ts        อ่าน/เขียน snapshot ใน IndexedDB (ไม่ใช่ localStorage — payload ~5.1 MB)
+│   ├── use-snapshot.ts          โหลดจาก cache ก่อน แล้วรีเฟรชจาก MongoDB ทุก 5 นาที
+│   ├── use-local-filters.ts     กรองจาก snapshot ในเครื่อง + sync URL ผ่าน History API
+│   ├── view-models/             builder ของ /investigate และ /events ใช้ร่วมกันทั้งสองฝั่ง
 │   ├── datetime.ts              จัดรูปแบบวันที่ ตรึง timezone ไว้ที่ Asia/Bangkok
 │   ├── geo.ts                   จังหวัด/อำเภอ + projection ของแผนที่
 │   ├── palette.ts               สีตามประเภทเหตุการณ์
@@ -94,8 +101,9 @@ src/
 │   └── mongodb.ts               connection pool + ชื่อ collection
 ├── server/
 │   ├── shared-events.ts         loadBundle + matchedEvents (filter engine ที่ /investigate และ /events ใช้ร่วมกัน)
-│   ├── investigate.ts           query + aggregate เป็น view model ของหน้าสืบสวน
-│   ├── events.ts                view model ของหน้าเหตุการณ์ — facet, span, histogram, ทั้งชุดที่ตรงกับตัวกรอง
+│   ├── snapshot.ts              project เอกสารเป็น snapshot + memo 60 วิ + gzip/brotli + ETag
+│   ├── investigate.ts           first paint ของหน้าสืบสวน (เรียก view-model ตัวเดียวกับ client)
+│   ├── events.ts                first paint ของหน้าเหตุการณ์ (เรียก view-model ตัวเดียวกับ client)
 │   ├── cases.ts                 query/paginate/facet ของทะเบียนเคส (ทำใน MongoDB)
 │   ├── reports.ts               listCases ล็อกไว้ที่ source src_citizen สำหรับ /report
 │   └── report-intake.ts         Server Action รับฟอร์ม — ตาม protocol ใน mockup/MVP.md
@@ -128,7 +136,9 @@ processing_logs ─┘   (append-only)     (ยังเป็น claim)      (P
 
 ## ตัวกรอง
 
-ตัวกรองฝั่งซ้ายเขียนค่าลง URL แล้วให้ server component query ใหม่ ทำให้ share ลิงก์ได้
+ตัวกรองฝั่งซ้ายเขียนค่าลง URL ทำให้ share ลิงก์ได้ และเปิดลิงก์นั้นใหม่จะได้ผลเดิมเสมอ
+เพราะ server render จาก URL ก่อน JavaScript ทำงาน — แต่การกดใช้ตัวกรอง**ไม่ใช่**การ navigate
+อีกต่อไป ดูหัวข้อ "ชุดข้อมูลในเบราว์เซอร์" ด้านล่าง
 
 ```
 /investigate?range=7d&prov=pattani,yala&type=explosion&ver=verified&trusted=1
@@ -143,10 +153,37 @@ processing_logs ─┘   (append-only)     (ยังเป็น claim)      (P
 | `src` | source id เช่น `src_acled` |
 | `trusted` | `1` = เฉพาะแหล่งที่ trust score ≥ 70 |
 
-ตอนนี้ aggregation ทำในชั้นแอป (`src/server/investigate.ts`) ไม่ใช่ใน MongoDB
+ตอนนี้ aggregation ทำในชั้นแอป (`src/lib/view-models/`) ไม่ใช่ใน MongoDB
 เพราะข้อมูลยังอยู่หลักพัน record — index ที่จำเป็น (`2dsphere`, `time.start`,
 `provinceCode + event.type`) ถูกสร้างไว้แล้วใน `seed.ts` เมื่อข้อมูลโตค่อยย้าย
 filter/aggregate ลงไปเป็น aggregation pipeline
+
+### ชุดข้อมูลในเบราว์เซอร์
+
+เดิมทุกครั้งที่ติ๊ก checkbox แล้วกด "ใช้ตัวกรอง" จะเป็น `router.push` → server render
+(`force-dynamic`) → `loadBundle()` สแกน `event_candidates` ทั้ง 10,171 เอกสาร วัดได้
+~600–690 ms ต่อครั้งบน Mongo ในเครื่อง (Atlas ช้ากว่านี้มาก) ทั้งที่เบราว์เซอร์มีข้อมูลพอจะ
+ตอบเองอยู่แล้ว ตอนนี้:
+
+1. `GET /api/snapshot` ส่งชุดข้อมูลทั้งก้อนครั้งเดียว — projection ของ `event_candidates`
+   เหลือเฉพาะฟิลด์ที่ view model อ่านจริง (เอกสารดิบ 10.11 MB → 5.14 MB, บนสาย gzip 372 KB
+   / brotli 251 KB)
+2. เบราว์เซอร์เก็บไว้ใน **IndexedDB** (ไม่ใช่ `localStorage` ซึ่งเพดาน ~5 MB และเขียนแบบ
+   synchronous บน main thread)
+3. กดใช้ตัวกรอง = เรียก builder ตัวเดิมกับที่ server ใช้ (`lib/view-models/`) บนข้อมูลในเครื่อง
+   วัดได้ ~275 ms บน `/investigate` และ ~850 ms บน `/events` โดย**ไม่มี request ออกเลย**
+   URL ยังอัปเดต (History API) ปุ่ม Back/Forward ยังทำงาน
+4. รีเฟรชจาก MongoDB อัตโนมัติทุก **5 นาที** — ส่ง `If-None-Match` กลับไป ถ้าข้อมูลไม่เปลี่ยน
+   ได้ 304 (0 byte) ไม่ต้องโหลดใหม่ทั้งก้อน มุมซ้ายล่างของ sidebar บอกเวลาที่ซิงก์ล่าสุด
+   และกดรีเฟรชเองได้
+
+`version` ของ snapshot คือ hash ของ *เนื้อหา* (ไม่รวมเวลาที่ build) — แก้เอกสารโดยจำนวน
+เอกสารเท่าเดิมก็ยังทำให้ cache ในเบราว์เซอร์หมดอายุ และ build ใหม่ที่ข้อมูลไม่เปลี่ยนจะไม่
+ทำให้ทุกแท็บโหลดซ้ำโดยเปล่าประโยชน์ ฝั่ง server memo ไว้ 60 วินาที (สั้นกว่ารอบรีเฟรช)
+เพื่อไม่ให้ n แท็บกลายเป็น n full scan ทุก 5 นาที
+
+ถ้า IndexedDB ใช้ไม่ได้ (private window, บล็อก site data) หรือยังโหลดไม่เสร็จ ตัวกรองจะกลับไป
+navigate แบบเดิมโดยอัตโนมัติ — ช้าลง แต่ไม่พัง
 
 ## ทะเบียนเคส
 
@@ -244,7 +281,12 @@ round-trip ไป MongoDB ทุก tick
 - **คลัสเตอร์เสี่ยงสูง/ปานกลาง** ใช้ Poisson significance test ตัวเดียวกับ hotspot ของรายงาน
   ประชาชนใน `/investigate` (สรุปรวมเป็น `detectHotspots` ใน `lib/stats.ts`) จุดวางไว้ที่ centroid ของ
   พิกัดเหตุการณ์จริงในอำเภอนั้น ไม่ใช่ centroid ของขอบเขตปกครอง เพราะ `location.district` เป็น
-  free text ต่างกันไปตามแหล่งข้อมูล (บาง UCDP record เป็นชื่ออังกฤษ) จึง join กับโพลีกอนไม่ปลอดภัย
+  free text ต่างกันไปตามแหล่งข้อมูลจึง join กับโพลีกอนไม่ปลอดภัย — p-value ผ่าน
+  Benjamini-Hochberg ก่อนเสมอ เพราะการทดสอบทีละอำเภอหลายร้อยครั้งที่ `p < 0.05` ดิบ ๆ จะ
+  ผลิต hotspot ปลอมราว 5% ของจำนวนอำเภอที่ทดสอบทุกเฟรม (จำลองด้วยข้อมูลสุ่มล้วน 40 อำเภอ:
+  ~12 จุดปลอมต่อการสแกน เหลือ 0 หลังแก้) และหน้าต่าง "ล่าสุด/ฐาน" คิดเป็นสัดส่วนของช่วงที่เล่นไป
+  แล้ว (1 ใน 4 ต่อ 3 ใน 4) ไม่ใช่ 180/540 วันตายตัว ซึ่งทำให้ชั้นนี้ว่างเปล่าทุกครั้งที่เลือก
+  ช่วงเวลาแคบกว่านั้น
 - **สรุปปรากฏการณ์** สร้างจากคลัสเตอร์ที่มีนัยสำคัญทางสถิติเท่านั้น ไม่มีการเรียก LLM ใด ๆ — ไม่พบ
   รูปแบบที่มีนัยสำคัญคือคำตอบที่ถูกต้องเมื่อไม่มี ไม่ใช่ error
 - **ความหนาแน่นเหตุการณ์** เทียบอัตราในช่วง 180 วันล่าสุดกับอัตราเฉลี่ยระยะยาวของชุดข้อมูลเอง

@@ -44,7 +44,7 @@ import {
 } from "@/lib/basemap";
 import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
 import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
-import type { EventFeatureCollection } from "@/server/investigate";
+import type { EventFeatureCollection } from "@/server/shared-events";
 
 /**
  * Investigation map.
@@ -622,8 +622,14 @@ export default function MapPanel({
     latestTimestampRef.current = currentTimestamp;
   }, [currentTimestamp]);
 
+  // Uncontrolled mode only. A controlling parent (`EventsWorkspace`) runs its
+  // own tick at its own pace, and this one used to keep running alongside it:
+  // two intervals advancing the same playhead, so `/events` replayed at
+  // roughly the sum of both rates no matter what its speed buttons said, with
+  // the two writers interleaving into a visible stutter. Whoever owns the
+  // timestamp owns the ticking.
   useEffect(() => {
-    if (!playing || timeRange.end <= timeRange.start) return;
+    if (isControlled || !playing || timeRange.end <= timeRange.start) return;
     const step = Math.max(60 * 60 * 1000, Math.ceil((timeRange.end - timeRange.start) / 120));
     const timer = window.setInterval(() => {
       const t = latestTimestampRef.current;
@@ -636,7 +642,7 @@ export default function MapPanel({
       setCurrentTimestamp(next);
     }, 80);
     return () => window.clearInterval(timer);
-  }, [playing, timeRange.end, timeRange.start]);
+  }, [isControlled, playing, timeRange.end, timeRange.start]);
 
   const replayDate = new Intl.DateTimeFormat("th-TH", {
     day: "numeric",

@@ -16,7 +16,7 @@ import {
   SEVERITY_LABEL,
   riskBand,
 } from "@/lib/labels";
-import type { CaseDoc } from "@/lib/types";
+import type { SnapshotCase } from "@/lib/snapshot";
 
 const UPDATE_TAG = {
   urgent: { label: "หารีบยูเร่งด่วน", color: "#ef4444" },
@@ -34,7 +34,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 /** Right-hand rail: the case the analyst is currently working. */
-export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null }) {
+export default function CaseRail({ activeCase }: { activeCase: SnapshotCase | null }) {
   const fmtDate = new Intl.DateTimeFormat("th-TH", {
     day: "numeric",
     month: "short",
@@ -56,7 +56,7 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
   // read "กำลังสืบสวน", the severity always "วิกฤต", the risk always "สูงมาก",
   // whatever the case document actually said.
   const statusColor = CASE_STATUS_COLOR[activeCase.status];
-  const risk = riskBand(activeCase.risk_score);
+  const risk = riskBand(activeCase.riskScore);
 
   const entities = [
     { icon: IconUser, label: "บุคคล", n: activeCase.entities.people },
@@ -98,9 +98,9 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
         </div>
 
         <div className="mt-2.5">
-          <Row label="วันที่เกิดเหตุ">{fmtDate.format(activeCase.occurred_at)} น.</Row>
+          <Row label="วันที่เกิดเหตุ">{fmtDate.format(new Date(activeCase.occurredAtMs))} น.</Row>
           <Row label="สถานที่">{activeCase.location}</Row>
-          <Row label="ประเภทเหตุ">{activeCase.event_type}</Row>
+          <Row label="ประเภทเหตุ">{activeCase.eventType}</Row>
           <Row label="ระดับความรุนแรง">
             <span className="flex items-center gap-1.5">
               <span style={{ color: SEVERITY_COLOR[activeCase.severity] }}>
@@ -126,9 +126,9 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
           </Row>
           <div className="flex items-center gap-3 pt-1">
             <span className="w-[74px] shrink-0 text-[11px] text-ink-muted">ความเสี่ยงปัจจุบัน</span>
-            <RiskMeter value={activeCase.risk_score} width={80} />
+            <RiskMeter value={activeCase.riskScore} width={80} />
             <span className="num text-[15px] font-semibold text-ink">
-              {activeCase.risk_score}
+              {activeCase.riskScore}
               <span className="text-[11px] text-ink-muted"> / 100</span>
             </span>
             <span className="text-[11px] font-medium" style={{ color: risk.color }}>
@@ -182,7 +182,7 @@ export default function CaseRail({ activeCase }: { activeCase: CaseDoc | null })
               <li key={i} className="flex items-start gap-2">
                 <IconAlertTriangle size={12} stroke={1.8} className="mt-0.5 shrink-0" color={tag.color} />
                 <div className="min-w-0 flex-1">
-                  <p className="num text-[10.5px] text-ink-muted">{fmtDate.format(u.at)}</p>
+                  <p className="num text-[10.5px] text-ink-muted">{fmtDate.format(new Date(u.atMs))}</p>
                   <p className="text-[11.5px] leading-snug text-ink-dim">{u.text}</p>
                 </div>
                 <span

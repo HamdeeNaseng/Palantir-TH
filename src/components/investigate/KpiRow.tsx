@@ -6,7 +6,7 @@ import {
 } from "@tabler/icons-react";
 import Sparkline from "@/components/charts/Sparkline";
 import { ConfidenceRing } from "@/components/charts/Gauges";
-import type { KpiCard } from "@/server/investigate";
+import type { KpiCard } from "@/lib/view-models/investigate";
 
 const ICONS = {
   target: IconTarget,

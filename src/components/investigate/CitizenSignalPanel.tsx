@@ -7,7 +7,7 @@ import {
 } from "@tabler/icons-react";
 import AnomalyLine from "@/components/charts/AnomalyLine";
 import StackedBars from "@/components/charts/StackedBars";
-import type { CitizenSignal } from "@/server/investigate";
+import type { CitizenSignal } from "@/lib/view-models/investigate";
 
 /**
  * The emphasised panel from the mockup: volume of citizen / unofficial-source
@@ -16,11 +16,15 @@ import type { CitizenSignal } from "@/server/investigate";
 const signed = (n: number) => `${n >= 0 ? "+" : ""}${n}`;
 
 export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal }) {
+  // Every "N วัน" below reads the window the server actually summarised, which
+  // follows the sidebar's ช่วงเวลา — hard-coding 30 here meant a 90-day filter
+  // still claimed to be showing a month.
+  const days = citizen.windowDays;
   const tiles = [
     {
       label: "รายงานทั้งหมด",
       value: citizen.totalReports.toLocaleString("en-US"),
-      delta: `${signed(citizen.changePct)}% จาก 30 วันที่แล้ว`,
+      delta: `${signed(citizen.changePct)}% จาก ${days} วันที่แล้ว`,
       up: citizen.changePct >= 0,
       icon: IconFileSearch,
     },
@@ -34,14 +38,14 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
     {
       label: "คลัสเตอร์น่าสงสัย",
       value: String(citizen.suspiciousClusters),
-      delta: `${signed(citizen.clusterDelta)} จาก 30 วันที่แล้ว`,
+      delta: `${signed(citizen.clusterDelta)} จาก ${days} วันที่แล้ว`,
       up: citizen.clusterDelta >= 0,
       icon: IconTopologyStar3,
     },
     {
       label: "อัตราแปลงเป็นข้อเท็จจริง",
       value: `${citizen.factConversionPct}%`,
-      delta: `${signed(citizen.factConversionDelta)}% จาก 30 วันที่แล้ว`,
+      delta: `${signed(citizen.factConversionDelta)}% จาก ${days} วันที่แล้ว`,
       up: citizen.factConversionDelta >= 0,
       icon: IconShieldCheck,
     },
@@ -54,7 +58,7 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
           <IconChartHistogram size={15} stroke={1.8} className="text-azure" />
           แนวโน้มรายงานจากประชาชนและแหล่งข่าวไม่ทางการ
         </h3>
-        <span className="text-[10.5px] text-ink-muted">(30 วันล่าสุด)</span>
+        <span className="text-[10.5px] text-ink-muted">({days} วันล่าสุด)</span>
       </header>
 
       {/* Zeros here would read as "we measured nothing happening", when in fact
@@ -86,7 +90,7 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_auto] gap-1.5 px-1.5 pb-1.5">
         <div className="min-h-0 overflow-hidden rounded border border-[rgba(37,66,102,0.55)] bg-[rgba(10,20,36,0.6)] p-1.5">
           <div className="mb-1 flex items-baseline justify-between">
-            <h4 className="text-[11.5px] font-medium text-ink">แนวโน้มรายวัน (30 วัน)</h4>
+            <h4 className="text-[11.5px] font-medium text-ink">แนวโน้มรายวัน ({days} วัน)</h4>
             <span className="text-[10px] text-ink-muted">จำนวนรายงาน</span>
           </div>
           <AnomalyLine
@@ -103,7 +107,7 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-px w-4 border-t border-dashed border-ink-dim" />
-              ค่าเฉลี่ย 30 วัน
+              ค่าเฉลี่ย {days} วัน
             </span>
           </div>
         </div>
@@ -168,7 +172,7 @@ export default function CitizenSignalPanel({ citizen }: { citizen: CitizenSignal
                   <span className="flex-1 truncate text-ink-dim">{h.label}</span>
                   <span
                     className="num font-medium text-danger"
-                    title="สูงกว่าค่าที่คาดไว้หลังปรับตามแนวโน้มรวมทั้งพื้นที่แล้ว (p < 0.05)"
+                    title="สูงกว่าค่าที่คาดไว้หลังปรับตามแนวโน้มรวมทั้งพื้นที่แล้ว (ควบคุม false discovery rate ที่ 5% ทั้งการสแกน)"
                   >
                     +{h.delta}%
                   </span>
