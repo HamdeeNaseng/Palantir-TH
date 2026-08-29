@@ -2,6 +2,7 @@ import Link from "next/link";
 import { IconChevronRight, IconExternalLink } from "@tabler/icons-react";
 import { EVENT_TYPE_LABEL, SEVERITY_LABEL, VERIFICATION_LABEL } from "@/lib/labels";
 import { EVENT_COLOR, VERIFICATION_COLOR } from "@/lib/palette";
+import { EVENT_ICON } from "@/lib/event-icons";
 import { formatThaiDate } from "@/lib/datetime";
 import type { EventFeature } from "@/server/shared-events";
 
@@ -46,6 +47,7 @@ export default function InspectSummaryPanel({ feature }: { feature: EventFeature
 
   const p = feature.properties;
   const typeColor = EVENT_COLOR[p.type] ?? EVENT_COLOR.other;
+  const TypeIcon = EVENT_ICON[p.type] ?? EVENT_ICON.other;
   const verificationColor = VERIFICATION_COLOR[p.verification];
 
   return (
@@ -96,6 +98,7 @@ export default function InspectSummaryPanel({ feature }: { feature: EventFeature
           style={{ color: typeColor }}
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: typeColor }} />
+          <TypeIcon size={12} strokeWidth={2} className="shrink-0" aria-hidden />
           {EVENT_TYPE_LABEL[p.type] ?? p.type}
         </p>
       </div>

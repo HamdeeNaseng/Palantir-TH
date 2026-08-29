@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { IconCalendar, IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
+import { EVENT_ICON } from "@/lib/event-icons";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
@@ -204,6 +205,7 @@ export default function EventsFilterSidebar({
             <div className="flex flex-wrap gap-1.5">
               {facets.eventTypes.map((t) => {
                 const on = f.eventTypes.includes(t.value);
+                const Icon = EVENT_ICON[t.value] ?? EVENT_ICON.other;
                 return (
                   <button
                     key={t.value}
@@ -216,6 +218,7 @@ export default function EventsFilterSidebar({
                       background: on ? `${t.color}26` : "transparent",
                     }}
                   >
+                    <Icon size={12} strokeWidth={2} className="shrink-0" aria-hidden />
                     {t.label}
                     <span className="num opacity-70">{t.n.toLocaleString("en-US")}</span>
                   </button>

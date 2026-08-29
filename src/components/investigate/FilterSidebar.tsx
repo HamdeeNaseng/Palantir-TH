@@ -6,6 +6,7 @@ import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCES } from "@/lib/geo";
 import { EVENT_COLOR } from "@/lib/palette";
 import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
+import { EVENT_FAMILY_ICON, EVENT_ICON } from "@/lib/event-icons";
 import {
   DEFAULT_FILTERS,
   RANGE_OPTIONS,
@@ -24,6 +25,7 @@ import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
 const EVENT_TYPE_GROUPS = EVENT_FAMILIES.map((family) => ({
   family,
   label: EVENT_FAMILY_LABEL[family],
+  Icon: EVENT_FAMILY_ICON[family],
   types: typesInFamily(family),
 }));
 
@@ -202,11 +204,15 @@ export default function FilterSidebar({
           <div className="flex flex-wrap gap-1.5">
             {EVENT_TYPE_GROUPS.map((g) => (
               <div key={g.family} className="w-full">
-                <p className="mt-1 mb-1 text-[10px] text-ink-muted first:mt-0">{g.label}</p>
+                <p className="mt-1 mb-1 flex items-center gap-1 text-[10px] text-ink-muted first:mt-0">
+                  <g.Icon size={11} strokeWidth={2} className="shrink-0" aria-hidden />
+                  {g.label}
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {g.types.map((t) => {
                     const on = f.eventTypes.includes(t);
                     const color = EVENT_COLOR[t];
+                    const Icon = EVENT_ICON[t];
                     return (
                       <button
                         key={t}
@@ -219,6 +225,7 @@ export default function FilterSidebar({
                           background: on ? `${color}26` : "transparent",
                         }}
                       >
+                        <Icon size={12} strokeWidth={2} className="shrink-0" aria-hidden />
                         {EVENT_TYPE_LABEL[t]}
                       </button>
                     );
