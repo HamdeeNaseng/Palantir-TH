@@ -18,11 +18,12 @@ import type { Snapshot } from "@/lib/snapshot";
  */
 export async function getEventsWorkspace(
   filters: InvestigationFilters = DEFAULT_FILTERS,
-): Promise<{ data: EventsWorkspace; snapshotVersion: Snapshot["version"] }> {
+): Promise<{ data: EventsWorkspace; snapshotVersion: Snapshot["version"]; snapshotBuiltAtMs: number }> {
   const snapshot = await getSnapshot();
   return {
     data: buildEventsWorkspace(snapshot, filters, Date.now()),
     snapshotVersion: snapshot.version,
+    snapshotBuiltAtMs: snapshot.builtAtMs,
   };
 }
 

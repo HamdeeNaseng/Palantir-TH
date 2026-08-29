@@ -27,10 +27,12 @@ import type { InvestigationDashboard } from "@/lib/view-models/investigate";
 export default function InvestigateWorkspace({
   initial,
   snapshotVersion,
+  snapshotBuiltAtMs,
   isLocalDev,
 }: {
   initial: InvestigationDashboard;
   snapshotVersion: string;
+  snapshotBuiltAtMs: number;
   /** Decided on the server: `process.env` is not readable from here. */
   isLocalDev: boolean;
 }) {
@@ -45,6 +47,7 @@ export default function InvestigateWorkspace({
     initialFilters: initial.filters,
     initialView: initial,
     initialVersion: snapshotVersion,
+    initialBuiltAtMs: snapshotBuiltAtMs,
     build: (snap, filters) => buildInvestigationDashboard(snap, filters, Date.now()),
   });
 

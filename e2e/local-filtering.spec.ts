@@ -170,3 +170,83 @@ test("every source option filters to exactly the count it advertises", async ({ 
     )
     .toBe(String(busiest.n));
 });
+
+/**
+ * A snapshot built while MongoDB was unreachable is `live: false` with no
+ * events. That used to be cached like any other and then preferred over the
+ * server's own render, so a browser that caught one during a brief outage
+ * showed zero events and answered every filter from an empty dataset —
+ * indefinitely, while the sidebar reported that it was filtering locally.
+ *
+ * The cache now refuses to store one, discards one it already holds, and the
+ * pages only adopt a held snapshot that is live and genuinely newer than the
+ * one the server rendered from.
+ */
+test("an outage snapshot in the cache cannot displace real data", async ({ page }) => {
+  const plantOutage = () =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("palantir-th", 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const request = db
+          .transaction("snapshot", "readwrite")
+          .objectStore("snapshot")
+          // A future `builtAtMs` on purpose: "newer" must not be enough to win.
+          .put(
+            {
+              schema: 1,
+              version: "outage",
+              builtAtMs: Date.now() + 86_400_000,
+              live: false,
+              events: [],
+              sources: [],
+              citizenReports: [],
+              cases: [],
+              districtsByProvince: {},
+            },
+            "current",
+          );
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    });
+
+  const total = async () =>
+    /เหตุการณ์ทั้งหมด\s*([\d,]+)/.exec(await page.locator("main").innerText())?.[1] ?? "";
+
+  await page.goto("/investigate");
+  await waitForLocalDataset(page);
+  const real = await total();
+  expect(real, "the fixture database should have events to lose").not.toBe("0");
+
+  await plantOutage();
+  await page.goto("/investigate");
+
+  // The server's own render must survive the poisoned cache.
+  await expect.poll(total, { timeout: 30_000 }).toBe(real);
+
+  // And the bad row must be gone rather than waiting to bite the next visit.
+  await waitForLocalDataset(page);
+  const cachedLive = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("palantir-th", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return new Promise<boolean | null>((resolve, reject) => {
+      const request = db.transaction("snapshot", "readonly").objectStore("snapshot").get("current");
+      request.onsuccess = () => resolve(request.result ? request.result.live : null);
+      request.onerror = () => reject(request.error);
+    });
+  });
+  expect(cachedLive, "a non-live snapshot must never remain cached").not.toBe(false);
+
+  // Filtering still narrows the data rather than answering from nothing.
+  await untickProvince(page, "ปัตตานี");
+  await page.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
+  await expect.poll(total, { timeout: 30_000 }).not.toBe(real);
+  expect(await total()).not.toBe("0");
+});

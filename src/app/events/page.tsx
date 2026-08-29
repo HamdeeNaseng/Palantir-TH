@@ -20,13 +20,17 @@ export default async function EventsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const filters = parseFilters(await searchParams);
-  const { data, snapshotVersion } = await getEventsWorkspace(filters);
+  const { data, snapshotVersion, snapshotBuiltAtMs } = await getEventsWorkspace(filters);
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
       <TopNav active="/events" />
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <EventsWorkspace initial={data} snapshotVersion={snapshotVersion} />
+        <EventsWorkspace
+          initial={data}
+          snapshotVersion={snapshotVersion}
+          snapshotBuiltAtMs={snapshotBuiltAtMs}
+        />
       </div>
     </div>
   );

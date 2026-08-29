@@ -88,6 +88,14 @@ export function useSnapshot(): SnapshotState {
 
     try {
       const next = await fetchSnapshot(versionRef.current, controller.signal);
+      if (next && !next.live) {
+        // MongoDB was unreachable when the server built this: no events, and
+        // `live: false`. Adopting it would replace a working dataset with an
+        // empty one and answer every filter from nothing, so keep whatever is
+        // already held and let the next poll try again. The page still shows
+        // the server's own "cannot reach the database" banner.
+        throw new Error("snapshot built without a database connection");
+      }
       if (next) {
         versionRef.current = next.version;
         setSnapshot(next);

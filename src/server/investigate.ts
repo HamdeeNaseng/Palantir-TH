@@ -23,11 +23,12 @@ import type { Snapshot } from "@/lib/snapshot";
  */
 export async function getInvestigationDashboard(
   filters: InvestigationFilters = DEFAULT_FILTERS,
-): Promise<{ data: InvestigationDashboard; snapshotVersion: Snapshot["version"] }> {
+): Promise<{ data: InvestigationDashboard; snapshotVersion: Snapshot["version"]; snapshotBuiltAtMs: number }> {
   const snapshot = await getSnapshot();
   return {
     data: buildInvestigationDashboard(snapshot, filters, Date.now()),
     snapshotVersion: snapshot.version,
+    snapshotBuiltAtMs: snapshot.builtAtMs,
   };
 }
 

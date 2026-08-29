@@ -70,14 +70,32 @@ export async function readCachedSnapshot(): Promise<Snapshot | null> {
   try {
     const row = await tx<Snapshot | undefined>("readonly", (store) => store.get(KEY));
     if (!row || row.schema !== SNAPSHOT_SCHEMA) return null;
+
+    // A snapshot built while MongoDB was unreachable is an honest empty state
+    // on the server — `live: false`, no events — and poison in this cache. It
+    // used to be stored like any other, and from then on every filter was
+    // answered from an empty dataset while the sidebar reported that it was
+    // filtering locally. Nothing writes one any more, but a browser that
+    // already holds one has to heal itself without the visitor clearing site
+    // data, so drop it on the way out.
+    if (!row.live) {
+      void clearCachedSnapshot();
+      return null;
+    }
     return row;
   } catch {
     return null;
   }
 }
 
-/** Best-effort write. A rejected quota or a private window is not an error here. */
+/**
+ * Best-effort write. A rejected quota or a private window is not an error here.
+ *
+ * Refuses to store a non-live snapshot: see `readCachedSnapshot`. Caching an
+ * outage would outlive the outage.
+ */
 export async function writeCachedSnapshot(snapshot: Snapshot): Promise<void> {
+  if (!snapshot.live) return;
   try {
     await tx("readwrite", (store) => store.put(snapshot, KEY));
   } catch {

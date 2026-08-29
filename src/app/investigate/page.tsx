@@ -20,7 +20,7 @@ export default async function InvestigatePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const filters = parseFilters(await searchParams);
-  const { data, snapshotVersion } = await getInvestigationDashboard(filters);
+  const { data, snapshotVersion, snapshotBuiltAtMs } = await getInvestigationDashboard(filters);
   const isLocalDev = process.env.NODE_ENV === "development" && !process.env.VERCEL;
 
   return (
@@ -35,6 +35,7 @@ export default async function InvestigatePage({
       <InvestigateWorkspace
         initial={data}
         snapshotVersion={snapshotVersion}
+        snapshotBuiltAtMs={snapshotBuiltAtMs}
         isLocalDev={isLocalDev}
       />
     </div>

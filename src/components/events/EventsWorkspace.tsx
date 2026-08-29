@@ -59,9 +59,11 @@ const MIN_PLAYBACK_STEP_MS = 900000;
 export default function EventsWorkspace({
   initial,
   snapshotVersion,
+  snapshotBuiltAtMs,
 }: {
   initial: EventsWorkspaceData;
   snapshotVersion: string;
+  snapshotBuiltAtMs: number;
 }) {
   // The server rendered `initial` for the URL's filters. From here on, every
   // filter change is answered from the snapshot in IndexedDB — same builder,
@@ -77,6 +79,7 @@ export default function EventsWorkspace({
     initialFilters: initial.filters,
     initialView: initial,
     initialVersion: snapshotVersion,
+    initialBuiltAtMs: snapshotBuiltAtMs,
     build: (snap, filters) => buildEventsWorkspace(snap, filters, Date.now()),
   });
 

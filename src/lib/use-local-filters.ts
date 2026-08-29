@@ -40,6 +40,7 @@ export function useLocalFilters<TView>({
   initialFilters,
   initialView,
   initialVersion,
+  initialBuiltAtMs,
   build,
 }: {
   /** Where a fallback navigation goes, e.g. `/events`. */
@@ -49,6 +50,8 @@ export function useLocalFilters<TView>({
   initialView: TView;
   /** The snapshot version `initialView` was built from, so a newer one wins. */
   initialVersion: string;
+  /** When that snapshot was read from MongoDB, for deciding which copy is newer. */
+  initialBuiltAtMs: number;
   build: (snapshot: Snapshot, filters: InvestigationFilters) => TView;
 }): LocalFilters<TView> {
   const router = useRouter();
@@ -69,15 +72,30 @@ export function useLocalFilters<TView>({
     [filters, initialFilters],
   );
 
-  const held = snapshot.snapshot;
+  /**
+   * A snapshot is only usable if the server that built it could reach MongoDB.
+   * One built during an outage carries `live: false` and no events; filtering
+   * against it answers everything with nothing, which is worse than the server
+   * round trip it replaces.
+   */
+  const held = snapshot.snapshot?.live ? snapshot.snapshot : null;
+
   /**
    * Rebuild locally when the filters have moved off what the server rendered,
-   * or when a refresh has brought data newer than the server render was built
+   * or when the held copy is genuinely newer than the one the server rendered
    * from. Otherwise keep the server's own output: it is the same function over
    * the same data, so recomputing it would cost ~10k events of work to arrive
    * back where we started.
+   *
+   * Newer is decided on `builtAtMs`, not on the versions merely differing.
+   * A hash says two datasets are not the same; it cannot say which came first,
+   * and "different, therefore mine wins" is how a stale cache displaces a
+   * fresher server render.
    */
-  const useLocal = Boolean(held) && (filtersChanged || held!.version !== initialVersion);
+  const useLocal =
+    held !== null &&
+    (filtersChanged ||
+      (held.version !== initialVersion && held.builtAtMs > initialBuiltAtMs));
 
   const view = useMemo(
     () => (useLocal && held ? build(held, filters) : initialView),

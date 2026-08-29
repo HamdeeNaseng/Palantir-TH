@@ -200,7 +200,10 @@ export async function getCachedSnapshot(): Promise<CachedSnapshot> {
 
   inFlight = build(cached)
     .then((next) => {
-      cached = next;
+      // Never pin an outage for a whole TTL. `loadBundle` turns an unreachable
+      // MongoDB into an empty bundle with `live: false`; serving that is right,
+      // but remembering it for a minute means the recovery is a minute late.
+      if (next.snapshot.live) cached = next;
       return next;
     })
     .finally(() => {
