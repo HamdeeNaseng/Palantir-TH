@@ -13,6 +13,12 @@ export interface AnomalyBand {
  * `band` overrides that anomaly highlight with a caller-supplied one instead
  * (used by `/events` to highlight "ช่วงที่กำลังเล่น" in azure rather than red) —
  * omitted, as `CitizenSignalPanel` does today, and behaviour is unchanged.
+ *
+ * `ariaLabel` likewise: the default describes this component's original and
+ * still most common use. `/events` plots a filtered span in years or months,
+ * not thirty days, so it supplies its own — the accessible name is the only
+ * account of the chart a screen reader gets, and a hard-coded one that
+ * contradicts the axis is worse than no chart at all.
  */
 export default function AnomalyLine({
   daily,
@@ -21,6 +27,7 @@ export default function AnomalyLine({
   labels,
   height = 132,
   band,
+  ariaLabel = "แนวโน้มรายวัน 30 วัน",
 }: {
   daily: number[];
   average: number[];
@@ -28,6 +35,7 @@ export default function AnomalyLine({
   labels: string[];
   height?: number;
   band?: AnomalyBand;
+  ariaLabel?: string;
 }) {
   const W = 420;
   const H = height;
@@ -72,7 +80,7 @@ export default function AnomalyLine({
       : null;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="แนวโน้มรายวัน 30 วัน">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={ariaLabel}>
       {[...new Set(grid)].map((v) => (
         <g key={v}>
           <line x1={padL} x2={W - 8} y1={y(v)} y2={y(v)} stroke="rgba(56,100,150,0.16)" />

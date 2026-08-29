@@ -13,6 +13,7 @@
     "gis:fetch": "tsx scripts/fetch-boundaries.ts",
     "gis:villages": "tsx scripts/fetch-villages.ts",
     "gis:roads": "tsx scripts/fetch-roads.ts",
+    "gis:facilities": "tsx scripts/fetch-facilities.ts",
     "gis:validate": "node scripts/validate-boundaries.mjs && tsx scripts/validate-events.ts",
     "gis:boundaries": "npm run gis:fetch && npm run gis:validate",
     "check": "npm run check:env && npm run gis:validate && npm run typecheck && npm run build",
@@ -26,7 +27,9 @@
     "ingest:police75": "tsx scripts/import-75-case-register.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "mongo:sync:pilot": "tsx scripts/sync-mongo.ts"
+    "mongo:sync:pilot": "tsx scripts/sync-mongo.ts --allow-remote-target",
+    "mongo:pull:prod": "tsx scripts/sync-mongo.ts --from .env.production --to .env.local",
+    "mongo:pull:prod:dry": "tsx scripts/sync-mongo.ts --from .env.production --to .env.local --dry-run"
   },
   "engines": {
     "node": "24.x",
@@ -36,6 +39,7 @@
   "dependencies": {
     "@tabler/icons-react": "^3.46.0",
     "dotenv": "17.4.2",
+    "lucide-react": "1.37.0",
     "maplibre-gl": "5.24.0",
     "mongodb": "6.21.0",
     "next": "^15.5.4",

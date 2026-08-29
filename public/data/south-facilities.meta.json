@@ -1,0 +1,43 @@
+{
+  "layer": "south-facilities",
+  "owner": "OpenStreetMap contributors",
+  "licence": "ODbL 1.0 — https://www.openstreetmap.org/copyright",
+  "published_via": "Overpass API",
+  "access_method": "Overpass QL (POST)",
+  "source_url": "https://overpass-api.de/api/interpreter",
+  "query": "[out:json][timeout:300];\n(\n  nwr[\"amenity\"=\"police\"](5.5,99.9,8.1,102.3);\n  nwr[\"barrier\"=\"checkpoint\"](5.5,99.9,8.1,102.3);\n  nwr[\"military\"=\"checkpoint\"](5.5,99.9,8.1,102.3);\n  nwr[\"military\"=\"barracks\"](5.5,99.9,8.1,102.3);\n  nwr[\"landuse\"=\"military\"](5.5,99.9,8.1,102.3);\n  nwr[\"amenity\"=\"fire_station\"](5.5,99.9,8.1,102.3);\n  nwr[\"emergency\"=\"ambulance_station\"](5.5,99.9,8.1,102.3);\n  nwr[\"amenity\"=\"hospital\"](5.5,99.9,8.1,102.3);\n  nwr[\"amenity\"=\"clinic\"](5.5,99.9,8.1,102.3);\n  nwr[\"healthcare\"=\"centre\"](5.5,99.9,8.1,102.3);\n  nwr[\"amenity\"=\"doctors\"](5.5,99.9,8.1,102.3);\n  nwr[\"amenity\"=\"shelter\"](5.5,99.9,8.1,102.3);\n  nwr[\"emergency\"=\"assembly_point\"](5.5,99.9,8.1,102.3);\n  nwr[\"amenity\"=\"social_facility\"](5.5,99.9,8.1,102.3);\n);\nout center tags;",
+  "osm_data_timestamp": "2026-08-29T15:21:25Z",
+  "fetched_at": "2026-08-29T15:22:37.636Z",
+  "crs": "EPSG:4326",
+  "encoding": "UTF-8",
+  "geometry": "Point (areas reduced to their centre)",
+  "feature_count": 217,
+  "feature_count_by_kind": {
+    "checkpoint": 38,
+    "military": 11,
+    "police": 64,
+    "rescue": 1,
+    "fire": 7,
+    "evacuation": 0,
+    "aid": 1,
+    "health": 18,
+    "hospital": 77
+  },
+  "feature_count_by_province": {
+    "90": 90,
+    "94": 49,
+    "95": 27,
+    "96": 51
+  },
+  "rows_with_name": 138,
+  "rows_with_phone": 2,
+  "rows_with_opening_hours": 4,
+  "rows_with_start_or_end_date": 0,
+  "dropped": {
+    "not_one_of_the_nine_kinds": 728,
+    "no_position": 0,
+    "outside_four_provinces": 622
+  },
+  "joined_against": "public/data/south-districts.geojson, public/data/south-subdistricts.geojson",
+  "notes": "ไม่ใช่ทะเบียนหน่วยงานทางการ — เป็นข้อมูลที่อาสาสมัคร OSM ร่วมกันสร้าง ความครอบคลุมไม่เท่ากันในแต่ละพื้นที่ โดยเฉพาะด่านตรวจและค่ายทหารซึ่งมีการทำแผนที่น้อยกว่าโรงพยาบาลมาก สถานที่ที่ไม่ปรากฏในไฟล์นี้ให้อ่านว่า 'ยังไม่ถูกทำแผนที่' ไม่ใช่ 'ไม่มี' จุดของพื้นที่ (โรงพยาบาล/ค่าย) คือจุดกึ่งกลางเพื่อใช้อ้างอิงตำแหน่ง ไม่ใช่ขอบเขตของสถานที่ การเผยแพร่ซ้ำต้องให้เครดิต OpenStreetMap ตามเงื่อนไข ODbL"
+}

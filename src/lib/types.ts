@@ -158,6 +158,37 @@ export const GEO_PRECISION_RADIUS_M: Record<GeoPrecision, number> = {
   unknown: 25000,
 };
 
+const GEO_PRECISION_VALUES = new Set<string>(Object.keys(GEO_PRECISION_RADIUS_M));
+
+/**
+ * A stored `geo_precision` as one of the seven values this app can reason
+ * about.
+ *
+ * Ingestion does not enforce the vocabulary: 189 of the 10,173 records in the
+ * current collection carry a free-form value its connector invented —
+ * `subdistrict_reference_estimated`, `checkpoint_geolocated`,
+ * `roadwork_site_estimated_via_superseded_event`. Indexing
+ * `GEO_PRECISION_RADIUS_M` with one of those returns `undefined`, and an
+ * `undefined` radius propagates as `NaN` into map geometry: the case page fit
+ * its bounds from it and MapLibre rejected the whole viewport with "Invalid
+ * LngLat object: (NaN, NaN)", leaving the map unframed and the caption reading
+ * "คลาดเคลื่อนราว NaN กม.".
+ *
+ * Anything unrecognised is therefore `unknown` — the widest ring, 25 km.
+ * Guessing a level from the string (`village_reference` → `village`) would be
+ * inventing a precision claim the vocabulary never made; overstating the
+ * uncertainty is the only direction that cannot make a coarse point look
+ * sharper than it is.
+ */
+export function asGeoPrecision(value: string | null | undefined): GeoPrecision {
+  return value && GEO_PRECISION_VALUES.has(value) ? (value as GeoPrecision) : "unknown";
+}
+
+/** The uncertainty radius for a stored `geo_precision`, never `undefined`. */
+export function geoPrecisionRadiusM(value: string | null | undefined): number {
+  return GEO_PRECISION_RADIUS_M[asGeoPrecision(value)];
+}
+
 /** `source_registry` — the catalogue of every ingestion source. */
 export interface SourceRegistryDoc {
   _id: string;
@@ -263,8 +294,16 @@ export interface EventCandidateDoc {
     place: string | null;
     /** null when the evidence names an address/site but publishes no defensible coordinates. */
     geo: GeoPoint | null;
-    /** Never treat a district centroid as a GPS fix — see GeoPrecision. */
-    geo_precision: GeoPrecision;
+    /**
+     * Never treat a district centroid as a GPS fix — see GeoPrecision.
+     *
+     * Typed as the raw `string` it actually is, not as `GeoPrecision`: the
+     * ingestion connectors write their own wording here and the collection
+     * holds 30-odd distinct values. Every read must go through
+     * `asGeoPrecision` / `geoPrecisionRadiusM`, and this type is what makes
+     * the compiler say so.
+     */
+    geo_precision: string;
   };
   event: {
     type: EventType;

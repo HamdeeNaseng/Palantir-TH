@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Map, {
   AttributionControl,
   Layer,
@@ -20,11 +21,20 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
+  IconChevronRight,
   IconRoute,
   IconSatellite,
   IconStack2,
 } from "@tabler/icons-react";
-import { EVENT_COLOR } from "@/lib/palette";
+import { EVENT_COLOR, EVENT_FAMILY_COLOR } from "@/lib/palette";
+import { EVENT_FAMILY_ICON, EVENT_ICON, MAP_LAYER_ICON } from "@/lib/event-icons";
+import {
+  addEventBadgeImages,
+  buildEventBadgeImages,
+  EVENT_BADGE_LAYER,
+  EventBadgeSprite,
+} from "@/lib/map-event-icons";
+import type { LinkableFamily } from "@/lib/events-replay";
 import type { FlowLeg } from "@/lib/flow/types";
 import {
   FLOW_CORRIDOR_LAYER,
@@ -43,7 +53,7 @@ import {
   type BasemapFill,
 } from "@/lib/basemap";
 import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
-import { EVENT_FAMILIES, typesInFamily } from "@/lib/types";
+import { EVENT_FAMILIES, typesInFamily, type EventType } from "@/lib/types";
 import type { EventFeatureCollection } from "@/server/shared-events";
 
 /**
@@ -85,7 +95,7 @@ const THAILAND_BOUNDS: [[number, number], [number, number]] = [
  * timeline scrubber along the bottom. Without the bottom inset the four focus
  * provinces land directly behind the scrubber at national zoom.
  */
-const FIT_PADDING = { top: 14, bottom: 74, left: 16, right: 170 };
+const FIT_PADDING = { top: 14, bottom: 74, left: 16, right: 190 };
 
 const SOUTH = {
   provinces: "/data/south-provinces.geojson",
@@ -118,8 +128,26 @@ const THAILAND = "/data/thailand-provinces.geojson";
 const LEGEND = EVENT_FAMILIES.map((family) => ({
   family,
   label: EVENT_FAMILY_LABEL[family],
-  types: typesInFamily(family).map((t) => ({ type: t, label: EVENT_TYPE_LABEL[t], color: EVENT_COLOR[t] })),
+  Icon: EVENT_FAMILY_ICON[family],
+  types: typesInFamily(family).map((t) => ({
+    type: t,
+    label: EVENT_TYPE_LABEL[t],
+    color: EVENT_COLOR[t],
+    Icon: EVENT_ICON[t],
+  })),
 }));
+
+/**
+ * Where a dot goes when it is clicked.
+ *
+ * The canonical detail route is plural (`/cases/<id>`); `/case/<id>` exists as
+ * an alias and only redirects here, so linking straight at the canonical form
+ * saves the round trip. The id is the event candidate's `_id` — the same key
+ * `getCaseDetail` reads — carried on every feature as `properties.id`.
+ */
+function caseHref(id: string): string {
+  return `/cases/${encodeURIComponent(id)}`;
+}
 
 const VIEWS = ["แผนที่", "ความหนาแน่น", "ไฮบริด"] as const;
 type View = (typeof VIEWS)[number];
@@ -309,11 +337,28 @@ const POINT_LAYER = {
   },
 } satisfies LayerProps;
 
+/**
+ * Coloured by family, from the same `EVENT_FAMILY_COLOR` the trend chart uses:
+ * with four separate chains on screen at once, one shared cyan would read as a
+ * single tangled path rather than four independent ones.
+ */
 const TIME_PATH_LAYER = {
   id: "time-path-line",
   type: "line",
   paint: {
-    "line-color": "#38bdf8",
+    "line-color": [
+      "match",
+      ["get", "family"],
+      "violence",
+      EVENT_FAMILY_COLOR.violence,
+      "gang",
+      EVENT_FAMILY_COLOR.gang,
+      "narcotics",
+      EVENT_FAMILY_COLOR.narcotics,
+      "crime",
+      EVENT_FAMILY_COLOR.crime,
+      "#38bdf8",
+    ] as ExpressionSpecification,
     "line-width": 1.6,
     "line-dasharray": [2, 1.6],
     "line-opacity": 0.85,
@@ -367,7 +412,15 @@ const VILLAGE_LAYER = {
   },
 } satisfies LayerProps;
 
-/** The two layers a click or hover is allowed to hit. */
+/**
+ * The layers a click or hover resolves to an event. The badge is in here as
+ * well as the dot: it is drawn directly above its own dot and covers the
+ * pixels an analyst would otherwise aim at, so leaving it inert would make the
+ * glyph the one part of a marker that does not answer the pointer.
+ */
+const EVENT_HIT_LAYERS = ["events-point", EVENT_BADGE_LAYER.id];
+
+/** Everything a click or hover is allowed to hit, badges aside. */
 const INTERACTIVE_LAYERS = ["events-point", "province-fill"];
 
 /** What a hovered event dot needs to draw its popup. */
@@ -410,8 +463,11 @@ interface MapPanelProps {
   onHoverFeature?: (id: string | null) => void;
   /** Fires on click of a point. */
   onSelectFeature?: (id: string | null) => void;
-  /** A short, already-scoped recent-movement line — see `scopedTimePath`. */
-  timePath?: [number, number][];
+  /**
+   * The short, already-scoped recent-movement lines — one per event family,
+   * never one chain across families. See `scopedTimePaths`.
+   */
+  timePaths?: { family: LinkableFamily; coordinates: [number, number][] }[];
   /** Statistically-significant district clusters — see `districtClusters`. */
   clusters?: MapCluster[];
   /**
@@ -436,7 +492,7 @@ export default function MapPanel({
   onPlayingChange,
   onHoverFeature,
   onSelectFeature,
-  timePath,
+  timePaths,
   clusters,
   flowLegs,
   flowCorridorsEnabled,
@@ -444,6 +500,7 @@ export default function MapPanel({
   flowUnavailable,
   flowReason,
 }: MapPanelProps) {
+  const router = useRouter();
   const mapRef = useRef<MapRef | null>(null);
   const [view, setView] = useState<View>("ไฮบริด");
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
@@ -452,6 +509,10 @@ export default function MapPanel({
   // a phone screen on top of one, so below `lg` it starts as its header only.
   const [legendOpen, setLegendOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  // Gates the badge layer: see `map-event-icons.tsx` on why it must not mount
+  // before its images are registered.
+  const [badgesReady, setBadgesReady] = useState(false);
+  const spriteRef = useRef<HTMLDivElement | null>(null);
   // Sticky: once the analyst has been in close, the files are cached anyway.
   const [detail, setDetail] = useState(false);
   const [hover, setHover] = useState<HoverInfo | null>(null);
@@ -481,6 +542,14 @@ export default function MapPanel({
   // satellite toggle edits it in place instead.
   const mapStyle = useMemo(() => baseStyle(), []);
 
+  // Naming a layer that is not in the style yet makes MapLibre's
+  // queryRenderedFeatures complain, so the badge joins this list only once it
+  // is actually mounted.
+  const interactiveLayerIds = useMemo(
+    () => (badgesReady ? [...INTERACTIVE_LAYERS, EVENT_BADGE_LAYER.id] : INTERACTIVE_LAYERS),
+    [badgesReady],
+  );
+
   /**
    * Event replay is a GPU-layer filter: advancing time re-evaluates an
    * expression, it does not create or destroy DOM nodes, so it stays cheap as
@@ -497,11 +566,14 @@ export default function MapPanel({
 
   const timePathData = useMemo(
     () => ({
-      type: "Feature" as const,
-      geometry: { type: "LineString" as const, coordinates: timePath ?? [] },
-      properties: {},
+      type: "FeatureCollection" as const,
+      features: (timePaths ?? []).map((path) => ({
+        type: "Feature" as const,
+        geometry: { type: "LineString" as const, coordinates: path.coordinates },
+        properties: { family: path.family },
+      })),
     }),
-    [timePath],
+    [timePaths],
   );
 
   const flowLegsData = useMemo(() => toFlowFeatureCollection(flowLegs ?? []), [flowLegs]);
@@ -527,6 +599,28 @@ export default function MapPanel({
     setSatelliteBasemap(m, satellite, SATELLITE_FILLS);
   }, [satellite, ready]);
 
+  // Rasterise the type glyphs once the style is up. Failure here is not fatal
+  // — `badgesReady` simply stays false and the map is the plain dot field it
+  // was before — so it is logged rather than surfaced.
+  useEffect(() => {
+    const m = mapRef.current?.getMap();
+    const sprite = spriteRef.current;
+    if (!m || !ready || !sprite) return;
+
+    let cancelled = false;
+    buildEventBadgeImages(sprite)
+      .then((badges) => {
+        if (cancelled) return;
+        addEventBadgeImages(m, badges);
+        setBadgesReady(true);
+      })
+      .catch((err) => console.error("[maplibre] event badge icons", err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+
   /**
    * One handler for both interactive layers, because a click can legitimately
    * land on both: the dot the analyst meant, and the province polygon under
@@ -534,10 +628,19 @@ export default function MapPanel({
    */
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
-      const point = e.features?.find((f) => f.layer.id === "events-point");
+      const point = e.features?.find((f) => EVENT_HIT_LAYERS.includes(f.layer.id));
       const province = e.features?.find((f) => f.layer.id === "province-fill");
 
       onSelectFeature?.(point ? String(point.properties.id) : null);
+
+      // A dot is the case, so clicking it opens the case. The popup can't
+      // carry the link itself: it is driven by hover, and moving the pointer
+      // off the dot to reach it takes the pointer off the canvas, which closes
+      // it — the map's own click is the only reachable target.
+      if (point) {
+        router.push(caseHref(String(point.properties.id)));
+        return;
+      }
 
       if (province) {
         const props = province.properties as Record<string, string>;
@@ -550,7 +653,7 @@ export default function MapPanel({
         });
       }
     },
-    [onSelectFeature],
+    [onSelectFeature, router],
   );
 
   /**
@@ -576,7 +679,7 @@ export default function MapPanel({
 
   const handleMouseMove = useCallback(
     (e: MapLayerMouseEvent) => {
-      const f = e.features?.find((feature) => feature.layer.id === "events-point");
+      const f = e.features?.find((feature) => EVENT_HIT_LAYERS.includes(feature.layer.id));
       if (!f) {
         reportHover(null);
         // Same value bails out of a re-render on React's own identity check.
@@ -669,7 +772,7 @@ export default function MapPanel({
         style={{ width: "100%", height: "100%" }}
         attributionControl={false}
         dragRotate={false}
-        interactiveLayerIds={INTERACTIVE_LAYERS}
+        interactiveLayerIds={interactiveLayerIds}
         cursor={hover ? "pointer" : undefined}
         onLoad={(e) => {
           setReady(true);
@@ -716,12 +819,24 @@ export default function MapPanel({
             filter={timeFilter}
             layout={{ visibility: view !== "ความหนาแน่น" ? "visible" : "none" }}
           />
+          {/* The type glyph above each dot — same filter, same visibility, so
+              it can never say something the dot underneath it does not. */}
+          {badgesReady && (
+            <Layer
+              {...EVENT_BADGE_LAYER}
+              filter={timeFilter}
+              layout={{
+                ...EVENT_BADGE_LAYER.layout,
+                visibility: view !== "ความหนาแน่น" ? "visible" : "none",
+              }}
+            />
+          )}
         </Source>
 
         {/* Rendered only when a parent actually supplies these —
             `/investigate`'s plain usage never creates them, so its map is
             unchanged. */}
-        {timePath !== undefined && (
+        {timePaths !== undefined && (
           <Source id="time-path" type="geojson" data={timePathData}>
             <Layer {...TIME_PATH_LAYER} />
           </Source>
@@ -749,6 +864,7 @@ export default function MapPanel({
             offset={10}
           >
             <div className="pp-title">{String(hover.props.title)}</div>
+            <PopupType type={String(hover.props.type) as EventType} />
             <div className="pp-meta">
               อ.{String(hover.props.district)} จ.{String(hover.props.province)}
             </div>
@@ -764,6 +880,10 @@ export default function MapPanel({
             <div className="pp-row">
               <span>ความละเอียดพิกัด</span>
               <b>{PRECISION_LABEL[String(hover.props.precision)] ?? "ไม่ระบุ"}</b>
+            </div>
+            <div className="pp-action">
+              คลิกเพื่อเปิดหน้าเคส
+              <IconChevronRight size={11} stroke={2.2} aria-hidden />
             </div>
           </Popup>
         )}
@@ -866,7 +986,7 @@ export default function MapPanel({
                     <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
                       {flowReason
                         ? FLOW_UNAVAILABLE_LABEL[flowReason]
-                        : "คำนวณเส้นทางบนโครงข่ายถนนจริงจากข้อมูล OSM (ทดลอง)"}
+                        : "คำนวณเส้นทางบนโครงข่ายถนนจริงจากข้อมูล OSM เชื่อมเฉพาะเหตุในกลุ่มเดียวกัน (ทดลอง)"}
                     </span>
                   </span>
                 </label>
@@ -916,7 +1036,7 @@ export default function MapPanel({
         </div>
 
         {/* Legend */}
-        <div className="pointer-events-auto absolute top-14 right-2 flex max-h-[calc(100%-4rem)] w-[136px] flex-col overflow-y-auto rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5 lg:top-2.5 lg:right-2.5 lg:max-h-[calc(100%-1.25rem)] lg:w-[152px]">
+        <div className="pointer-events-auto absolute top-14 right-2 flex max-h-[calc(100%-4rem)] w-[152px] flex-col overflow-y-auto rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5 lg:top-2.5 lg:right-2.5 lg:max-h-[calc(100%-1.25rem)] lg:w-[172px]">
           <button
             type="button"
             onClick={() => setLegendOpen((v) => !v)}
@@ -935,13 +1055,29 @@ export default function MapPanel({
           <ul className={`space-y-1 lg:block ${legendOpen ? "block" : "hidden"}`}>
             {LEGEND.map((g) => (
               <li key={g.family}>
-                <p className="text-[9.5px] tracking-wide text-ink-muted uppercase">{g.label}</p>
+                <p className="flex items-center gap-1 text-[9.5px] tracking-wide text-ink-muted uppercase">
+                  <g.Icon size={10} strokeWidth={2} className="shrink-0" aria-hidden />
+                  {g.label}
+                </p>
                 <ul className="mt-0.5 space-y-1">
                   {g.types.map((l) => (
-                    <li key={l.type} className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+                    <li key={l.type} className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
+                      {/* Dot then glyph, in that order and both in the type's
+                          colour: the dot is what the map draws at every zoom,
+                          the glyph what it adds once close enough to read one.
+                          A legend that showed only the glyph would stop
+                          explaining the marker the analyst is actually
+                          looking at. */}
                       <span
                         className="h-2 w-2 shrink-0 rounded-full"
                         style={{ background: l.color, boxShadow: `0 0 5px ${l.color}` }}
+                      />
+                      <l.Icon
+                        size={11}
+                        strokeWidth={2}
+                        className="shrink-0"
+                        style={{ color: l.color }}
+                        aria-hidden
                       />
                       {l.label}
                     </li>
@@ -949,32 +1085,43 @@ export default function MapPanel({
                 </ul>
               </li>
             ))}
-            <li className="flex items-center gap-2 pt-1 text-[10.5px] text-ink-dim">
+            {/* Basemap and boundary rows. The swatch stays — it is the only
+                thing that says what weight and colour to look for — and the
+                glyph names the kind of thing it is, which three near-identical
+                hairlines cannot do on their own. */}
+            <li className="flex items-center gap-1.5 pt-1 text-[10.5px] text-ink-dim">
               <span className="h-2 w-3 shrink-0 rounded-[1px] bg-[#0c3150] ring-1 ring-azure/70" />
+              <MAP_LAYER_ICON.surveillance_area size={11} strokeWidth={2} className="shrink-0 text-azure" aria-hidden />
               พื้นที่เฝ้าระวัง 4 จังหวัด
             </li>
-            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+            <li className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
               <span className="h-2 w-3 shrink-0 rounded-[1px] bg-[#0a1826] ring-1 ring-[#1e3a5c]" />
+              <MAP_LAYER_ICON.other_province size={11} strokeWidth={2} className="shrink-0 text-ink-muted" aria-hidden />
               จังหวัดอื่น
             </li>
-            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+            <li className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
               <span className="h-px w-3 shrink-0 bg-azure" />
+              <MAP_LAYER_ICON.province_boundary size={11} strokeWidth={2} className="shrink-0 text-azure" aria-hidden />
               ขอบเขตจังหวัด
             </li>
-            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+            <li className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
               <span className="h-px w-3 shrink-0 bg-azure/50" />
+              <MAP_LAYER_ICON.district_boundary size={11} strokeWidth={2} className="shrink-0 text-azure/60" aria-hidden />
               ขอบเขตอำเภอ
             </li>
-            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+            <li className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
               <span className="h-px w-3 shrink-0 bg-[#7dd3fc]/40" />
+              <MAP_LAYER_ICON.subdistrict_boundary size={11} strokeWidth={2} className="shrink-0 text-[#7dd3fc]/60" aria-hidden />
               ขอบเขตตำบล
             </li>
-            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+            <li className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
               <span className="h-1 w-1 shrink-0 rounded-full bg-[#e2f2ff]" />
+              <MAP_LAYER_ICON.osm_village size={11} strokeWidth={2} className="shrink-0 text-[#e2f2ff]" aria-hidden />
               หมู่บ้าน (OSM)
             </li>
-            <li className="flex items-center gap-2 text-[10.5px] text-ink-dim">
+            <li className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
               <span className="h-2 w-2 shrink-0 rounded-full border border-ink-muted" />
+              <MAP_LAYER_ICON.uncertainty_boundary size={11} strokeWidth={2} className="shrink-0 text-ink-muted" aria-hidden />
               ขอบเขตความคลาดเคลื่อน
             </li>
           </ul>
@@ -1024,6 +1171,10 @@ export default function MapPanel({
           </div>
         )}
       </div>
+
+      {/* Never shown. The source React renders the type glyphs into so they can
+          be rasterised for the map — see `map-event-icons.tsx`. */}
+      <EventBadgeSprite ref={spriteRef} />
     </section>
   );
 }
@@ -1037,6 +1188,27 @@ const PRECISION_LABEL: Record<string, string> = {
   province: "centroid จังหวัด",
   unknown: "ไม่ระบุ",
 };
+
+/**
+ * The hovered dot's category, spelled out.
+ *
+ * The popup used to name the place, the time and three numbers but never what
+ * kind of event it was — the colour of the dot was the only place that lived,
+ * which is exactly the single-channel encoding this change is undoing.
+ */
+function PopupType({ type }: { type: EventType }) {
+  const Icon = EVENT_ICON[type] ?? EVENT_ICON.other;
+  const color = EVENT_COLOR[type] ?? EVENT_COLOR.other;
+  return (
+    <div
+      className="pp-meta pp-type flex items-center gap-1.5"
+      style={{ "--pp-type-color": color } as React.CSSProperties}
+    >
+      <Icon size={11} strokeWidth={2} className="shrink-0" aria-hidden />
+      {EVENT_TYPE_LABEL[type] ?? type}
+    </div>
+  );
+}
 
 /** Popup timestamp, in the Buddhist-era calendar the rest of the UI uses. */
 function hoverWhen(hover: HoverInfo): string {

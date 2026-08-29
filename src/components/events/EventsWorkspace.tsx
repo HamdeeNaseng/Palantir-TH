@@ -14,8 +14,8 @@ import {
   districtClusters,
   phenomenaSummary,
   playedSoFar,
-  scopedTimePath,
-  scopedWindow,
+  scopedLinkGroups,
+  scopedTimePaths,
 } from "@/lib/events-replay";
 import { useFlowLegs } from "@/lib/flow/use-flow-legs";
 import SnapshotStatusNote from "@/components/layout/SnapshotStatusNote";
@@ -68,11 +68,18 @@ export default function EventsWorkspace({
   // The server rendered `initial` for the URL's filters. From here on, every
   // filter change is answered from the snapshot in IndexedDB — same builder,
   // no navigation, no MongoDB read. `data` is whichever of the two is current.
+  //
+  // `local` is what lets the sidebar drop its apply button: once the dataset
+  // is in hand a filter change costs one pass over it, so there is no reason
+  // to make the analyst commit a batch of changes before seeing any of them.
+  // Until then the button is still the only safe way to spend a round trip.
   const {
     view: data,
     apply,
+    applyLive,
     reset,
     pending,
+    local,
     snapshot,
   } = useLocalFilters<EventsWorkspaceData>({
     path: "/events",
@@ -85,7 +92,7 @@ export default function EventsWorkspace({
 
   const features = data.events.features;
 
-  const [currentTimestamp, setCurrentTimestamp] = useState(data.span?.endMs ?? Date.now());
+  const [internalTimestamp, setCurrentTimestamp] = useState(data.span?.endMs ?? Date.now());
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<1 | 2 | 4>(1);
   const [playbackStartMs, setPlaybackStartMs] = useState(data.span?.startMs ?? Date.now());
@@ -104,15 +111,34 @@ export default function EventsWorkspace({
   // mid-replay because a background sync happened to land is not something the
   // person watching it asked for. A refresh that genuinely extends the record
   // does move the span, and that one does resync.
+  //
+  // Derived during this render rather than applied by an effect, because an
+  // effect lands one commit too late: everything below would compute once
+  // against the outgoing playhead and then immediately again against the reset
+  // one, and `districtClusters` — a Poisson scan of every played event — is
+  // the most expensive thing on that path. Measured at two full runs of it per
+  // filter change. React re-runs this component before committing, so the
+  // reset is visible to the memos below on the first pass and the second finds
+  // its dependencies unchanged.
+  //
+  // No `Date.now()` fallback here, unlike the initial state above: this must
+  // be pure, and it would differ between the two passes. An empty result set
+  // therefore leaves the playhead and window where they were instead of
+  // snapping them to now — which is also the better answer, since a filter
+  // that matches nothing is usually one the analyst is about to widen again.
   const spanStartMs = data.span?.startMs;
   const spanEndMs = data.span?.endMs;
-  useEffect(() => {
-    setCurrentTimestamp(spanEndMs ?? Date.now());
-    setPlaybackStartMs(spanStartMs ?? Date.now());
-    setPlaybackEndMs(spanEndMs ?? Date.now());
+  const spanKey = `${spanStartMs ?? ""}:${spanEndMs ?? ""}`;
+  const [syncedSpanKey, setSyncedSpanKey] = useState(spanKey);
+  const spanMoved = spanKey !== syncedSpanKey;
+  const currentTimestamp = spanMoved ? (spanEndMs ?? internalTimestamp) : internalTimestamp;
+  if (spanMoved) {
+    setSyncedSpanKey(spanKey);
+    setCurrentTimestamp(currentTimestamp);
+    setPlaybackStartMs(spanStartMs ?? playbackStartMs);
+    setPlaybackEndMs(spanEndMs ?? playbackEndMs);
     setPlaying(autoPlay);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spanStartMs, spanEndMs]);
+  }
 
   // Playback tick — same shape as MapPanel's own uncontrolled timer, lifted
   // here since this is now the single source of truth for the playhead.
@@ -136,13 +162,22 @@ export default function EventsWorkspace({
   }, [playing, playbackStartMs, playbackEndMs, speed]);
 
   const playedFeatures = useMemo(() => playedSoFar(features, currentTimestamp), [features, currentTimestamp]);
-  const pathCoords = useMemo(() => scopedTimePath(features, currentTimestamp), [features, currentTimestamp]);
-  const flowWindow = useMemo(() => scopedWindow(features, currentTimestamp), [features, currentTimestamp]);
+  // One chain per event family, and only for the families a link line is
+  // meaningful for — see `scopedLinkGroups`. The straight lines and the road
+  // corridors are two renderings of exactly the same grouping.
+  const linkGroups = useMemo(
+    () => scopedLinkGroups(features, currentTimestamp),
+    [features, currentTimestamp],
+  );
+  const timePaths = useMemo(
+    () => scopedTimePaths(features, currentTimestamp),
+    [features, currentTimestamp],
+  );
   const {
     legs: flowLegs,
     unavailable: flowUnavailable,
     reason: flowReason,
-  } = useFlowLegs(flowWindow, flowCorridorsEnabled);
+  } = useFlowLegs(linkGroups, flowCorridorsEnabled);
   const clusters = useMemo(() => districtClusters(features, currentTimestamp), [features, currentTimestamp]);
   const density = useMemo(
     () => densityScore(features, currentTimestamp, data.totalDistrictsInScope),
@@ -164,7 +199,8 @@ export default function EventsWorkspace({
       <EventsFilterSidebar
         initial={data.filters}
         facets={data.facets}
-        onApply={apply}
+        onApply={local ? applyLive : apply}
+        live={local}
         onReset={reset}
         pending={pending}
         footerNote={<SnapshotStatusNote snapshot={snapshot} />}
@@ -202,7 +238,7 @@ export default function EventsWorkspace({
               onPlayingChange={setPlaying}
               onHoverFeature={setHoveredId}
               onSelectFeature={setSelectedId}
-              timePath={pathCoords}
+              timePaths={timePaths}
               clusters={clusters.map((c) => ({ lng: c.lng, lat: c.lat, tier: c.tier, label: c.district }))}
               flowLegs={flowLegs}
               flowCorridorsEnabled={flowCorridorsEnabled}

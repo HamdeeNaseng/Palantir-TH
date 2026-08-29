@@ -8,6 +8,25 @@ import type { CompassDirection } from "./types";
  * package for a few dozen lines of well-known math.
  */
 
+/** Metres per degree of latitude — the same constant the boundary code uses. */
+const M_PER_DEG_LAT = 111_320;
+
+/**
+ * Straight-line distance in metres, flat-earth over a few kilometres.
+ *
+ * Lives here rather than in `@/lib/geography` because that module reads the
+ * boundary files off disk at import time and can therefore never be pulled
+ * into a browser bundle — and the facility editor needs to tell an analyst how
+ * far they just dragged a pin. `geography` re-exports this one, so there is
+ * still a single definition.
+ */
+export function distanceMetres(a: Position, b: Position): number {
+  const meanLat = ((a[1] + b[1]) / 2) * (Math.PI / 180);
+  const dx = (a[0] - b[0]) * M_PER_DEG_LAT * Math.cos(meanLat);
+  const dy = (a[1] - b[1]) * M_PER_DEG_LAT;
+  return Math.hypot(dx, dy);
+}
+
 /** Initial great-circle bearing from a to b, in degrees clockwise from north [0, 360). */
 export function bearingDeg(a: Position, b: Position): number {
   const lat1 = (a[1] * Math.PI) / 180;

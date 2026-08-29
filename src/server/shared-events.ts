@@ -2,7 +2,7 @@ import { COLLECTIONS, getDb } from "@/lib/mongodb";
 import { EVENT_COLOR } from "@/lib/palette";
 import { RANGE_DAYS, type InvestigationFilters } from "@/lib/filters";
 import { TRUSTED_SCORE_FLOOR } from "@/lib/snapshot";
-import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
+import { asGeoPrecision, geoPrecisionRadiusM } from "@/lib/types";
 import type {
   CaseDoc,
   CitizenReportDoc,
@@ -223,8 +223,8 @@ export function toEventFeature(e: EventCandidateDoc): EventFeature | null {
       title: e.event.title,
       district: e.location.district,
       province: e.location.province,
-      precision: e.location.geo_precision ?? "unknown",
-      precision_m: GEO_PRECISION_RADIUS_M[e.location.geo_precision ?? "unknown"],
+      precision: asGeoPrecision(e.location.geo_precision),
+      precision_m: geoPrecisionRadiusM(e.location.geo_precision),
       color: EVENT_COLOR[e.event.type],
       killed_known: e.casualties.killed !== null,
       killed: e.casualties.killed ?? 0,

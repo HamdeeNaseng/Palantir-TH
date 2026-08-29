@@ -13,6 +13,7 @@ import Map, {
 import type { StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { IconSatellite } from "@tabler/icons-react";
+import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
 import {
   SATELLITE_DEFAULT_ON,
   SATELLITE_SOURCE_ID,
@@ -226,23 +227,42 @@ export default function CaseLocationMap({
   // never needs re-issuing to MapLibre.
   const mapStyle = useMemo(() => style(), []);
 
-  const placed = lng !== null && lat !== null;
-  const view: [number, number] = placed ? [lng, lat] : (centre ?? [101.25, 6.6]);
+  /*
+   * Everything MapLibre is given below is checked for finiteness here, at the
+   * one boundary, because a single NaN does not degrade this map — it deletes
+   * it. `initialViewState.bounds` built from a NaN is rejected outright
+   * ("Invalid LngLat object: (NaN, NaN)") and the panel renders as an empty
+   * box with the reason only in the console.
+   *
+   * That is not hypothetical: `precisionM` arrived as `undefined` for the 189
+   * records whose `geo_precision` is a connector's own wording rather than one
+   * of the seven this app knows (`asGeoPrecision` normalises that at the read
+   * sites now). A coordinate can fail the same way if a geometry is malformed,
+   * and "no pin" is the honest rendering of both.
+   */
+  const point: [number, number] | null =
+    Number.isFinite(lng) && Number.isFinite(lat) ? [lng as number, lat as number] : null;
+  const placed = point !== null;
+  const radiusM = Number.isFinite(precisionM) ? precisionM : GEO_PRECISION_RADIUS_M.unknown;
+  const view: [number, number] =
+    point ?? (centre && centre.every((n) => Number.isFinite(n)) ? centre : [101.25, 6.6]);
 
   const here = useMemo(
     () => ({
       type: "FeatureCollection" as const,
-      features: placed
+      features: point
         ? [
             {
               type: "Feature" as const,
-              geometry: { type: "Point" as const, coordinates: [lng, lat] },
-              properties: { precision_m: precisionM, color },
+              geometry: { type: "Point" as const, coordinates: point },
+              properties: { precision_m: radiusM, color },
             },
           ]
         : [],
     }),
-    [placed, lng, lat, precisionM, color],
+    // `point` is a fresh array each render; its contents are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [point?.[0], point?.[1], radiusM, color],
   );
 
   const applySatellite = useCallback((next: boolean) => {
@@ -256,7 +276,7 @@ export default function CaseLocationMap({
       <Map
         ref={mapRef}
         initialViewState={{
-          bounds: boundsAround(view[0], view[1], placed ? precisionM : 6000),
+          bounds: boundsAround(view[0], view[1], placed ? radiusM : 6000),
           fitBoundsOptions: { padding: 24 },
         }}
         mapStyle={mapStyle}
@@ -308,10 +328,10 @@ export default function CaseLocationMap({
           )}
         </Source>
 
-        {editable && placed && (
+        {editable && point && (
           <Marker
-            longitude={lng}
-            latitude={lat}
+            longitude={point[0]}
+            latitude={point[1]}
             draggable
             onDragEnd={(e) => onMove?.({ lng: e.lngLat.lng, lat: e.lngLat.lat })}
           >

@@ -28,6 +28,11 @@ export default function EventsTrendPanel({
   const counts = buckets.map((b) => b.count);
   const average = rollingMean(counts, Math.max(2, Math.round(buckets.length / 8)));
   const labels = buckets.map((b) => b.label);
+  // Every matched event lands in exactly one bucket, so this is `totalMatched`
+  // arrived at the long way round — which is the point of saying it out loud.
+  // The chart is built from the filtered set and nothing else, and the
+  // accessible name is where a reader who cannot see the axis is told so.
+  const plotted = counts.reduce((sum, n) => sum + n, 0);
 
   const endIdx = bucketIndexAt(buckets, currentTimestamp);
   const startIdx = bucketIndexAt(buckets, currentTimestamp - HIGHLIGHT_LOOKBACK_MS);
@@ -48,6 +53,7 @@ export default function EventsTrendPanel({
             labels={labels}
             height={150}
             band={{ start: startIdx, end: endIdx, color: "#38bdf8", label: "ช่วงที่กำลังเล่น" }}
+            ariaLabel={`แนวโน้มเหตุการณ์ ${data.histogram.bucketLabel} ${plotted.toLocaleString("en-US")} เหตุการณ์ ใน ${buckets.length.toLocaleString("en-US")} ช่วง`}
           />
         ) : (
           <p className="py-8 text-center text-[11.5px] text-ink-muted">

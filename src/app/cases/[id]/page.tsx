@@ -12,13 +12,14 @@ import CaseLocationMap from "@/components/cases/CaseLocationMap";
 import CaseEditPanel from "@/components/cases/CaseEditPanel";
 import MediaThumb from "@/components/cases/MediaThumb";
 import { EVENT_COLOR, VERIFICATION_COLOR } from "@/lib/palette";
+import { EVENT_ICON } from "@/lib/event-icons";
 import {
   EVENT_TYPE_LABEL,
   GEO_PRECISION_LABEL,
   SEVERITY_LABEL,
   VERIFICATION_LABEL,
 } from "@/lib/labels";
-import { GEO_PRECISION_RADIUS_M } from "@/lib/types";
+import { asGeoPrecision, GEO_PRECISION_RADIUS_M } from "@/lib/types";
 import type { CaseCorrectionDoc } from "@/lib/types";
 import { formatByPrecision, formatThaiDateLong, formatThaiDateTime } from "@/lib/datetime";
 import { getCaseDetail, type CaseDetail } from "@/server/cases";
@@ -108,10 +109,15 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
   // system currently believes, while the facts panel below quotes the source.
   const current = detail.effective.event;
   const typeColor = EVENT_COLOR[current.event.type] ?? EVENT_COLOR.other;
+  const TypeIcon = EVENT_ICON[current.event.type] ?? EVENT_ICON.other;
   const verificationColor = VERIFICATION_COLOR[current.verification];
   const coordinates = current.location.geo?.coordinates ?? null;
   const [lng, lat] = coordinates ?? [0, 0];
-  const precision = current.location.geo_precision ?? "unknown";
+  // Normalised, not read straight off the document: a connector-specific
+  // value such as `subdistrict_reference_estimated` used to index out of
+  // `GEO_PRECISION_RADIUS_M` as `undefined`, which reached the map as a NaN
+  // viewport and this panel's caption as "คลาดเคลื่อนราว NaN กม.".
+  const precision = asGeoPrecision(current.location.geo_precision);
   const precisionM = GEO_PRECISION_RADIUS_M[precision];
   /**
    * The address-derived position, used only when no coordinate was published.
@@ -168,6 +174,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
                 className="chip"
                 style={{ color: typeColor, borderColor: `${typeColor}66`, background: `${typeColor}1f` }}
               >
+                <TypeIcon size={12} strokeWidth={2} className="shrink-0" aria-hidden />
                 {EVENT_TYPE_LABEL[current.event.type]}
               </span>
               <span className="chip num border-[rgba(56,100,150,0.6)] text-ink-dim">

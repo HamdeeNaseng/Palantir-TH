@@ -82,4 +82,31 @@ export const COLLECTIONS = {
   citizenReports: "citizen_reports",
   /** Analyst corrections layered over event_candidates — never edits to them. */
   caseCorrections: "case_corrections",
+
+  /**
+   * The response network on `/network`.
+   *
+   * `facilities` holds only what an analyst added by hand; the OSM-derived
+   * ones live in `public/data/south-facilities.geojson` and are never copied
+   * in here, so re-running the fetch cannot silently overwrite local
+   * knowledge. `facility_log` is append-only and carries both kinds of entry
+   * an operations desk produces — a status change and a coordination call —
+   * because "who said it was closed, and when" is the same question for both.
+   */
+  facilities: "facilities",
+  facilityLog: "facility_log",
+
+  /**
+   * Output of the Bayesian route-prediction batch in `ml-server/`. Written
+   * only by `python run_batch.py`; this app reads them and never writes.
+   *
+   * Every document is tagged with the `run_id` that produced it, and
+   * `flow_model_runs` carries which run is `live` — so a batch that is still
+   * writing is never the one being read. See `src/server/flow/predictions.ts`.
+   */
+  flowModelRuns: "flow_model_runs",
+  flowAnchors: "flow_anchors",
+  flowCorridors: "flow_corridors",
+  flowForecasts: "flow_forecasts",
+  flowSegments: "flow_segments",
 } as const;

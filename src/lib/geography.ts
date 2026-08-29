@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+// Defined in the client-safe geometry module so the browser can use it too —
+// see the note there. Re-exported because half this app imports it from here.
+export { distanceMetres } from "./flow/geo-math";
+import { distanceMetres } from "./flow/geo-math";
 
 /**
  * Real administrative geography, loaded from the DDPM boundaries in
@@ -338,23 +342,6 @@ export function subdistrictAt(pt: Position): Subdistrict | undefined {
       pt[1] <= s.bbox[3] &&
       pointInPolygon(pt, s.geometry),
   );
-}
-
-/** Metres per degree of latitude; longitude is scaled by cos(lat) at use. */
-const M_PER_DEG_LAT = 111_320;
-
-/**
- * Approximate great-circle distance in metres.
- *
- * An equirectangular approximation, not haversine: over the few kilometres
- * this is ever asked about, at 6-8°N, the error is centimetres — and it costs
- * one cosine instead of one per candidate.
- */
-export function distanceMetres(a: Position, b: Position): number {
-  const meanLat = ((a[1] + b[1]) / 2) * (Math.PI / 180);
-  const dx = (a[0] - b[0]) * M_PER_DEG_LAT * Math.cos(meanLat);
-  const dy = (a[1] - b[1]) * M_PER_DEG_LAT;
-  return Math.hypot(dx, dy);
 }
 
 /**

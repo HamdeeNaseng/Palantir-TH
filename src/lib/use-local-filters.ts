@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_FILTERS, parseFilters, serializeFilters, type InvestigationFilters } from "./filters";
 import { useSnapshot, type SnapshotState } from "./use-snapshot";
@@ -27,6 +35,11 @@ export interface LocalFilters<TView> {
   /** The server's view model until a local snapshot can improve on it. */
   view: TView;
   apply: (next: InvestigationFilters) => void;
+  /**
+   * `apply` for a control that fires on every interaction rather than on a
+   * button press. Only usable while `local` is true — see its own note.
+   */
+  applyLive: (next: InvestigationFilters) => void;
   reset: () => void;
   /** True while a fallback server navigation is in flight. */
   pending: boolean;
@@ -34,6 +47,15 @@ export interface LocalFilters<TView> {
   local: boolean;
   snapshot: SnapshotState;
 }
+
+/**
+ * How long after the last change a live filter session is considered over.
+ *
+ * Ticking four provinces is one act of filtering and should be one press of
+ * Back, not four. Within the burst the history entry is rewritten in place;
+ * the next change after a pause opens a new one.
+ */
+const LIVE_BURST_MS = 700;
 
 export function useLocalFilters<TView>({
   path,
@@ -131,6 +153,42 @@ export function useLocalFilters<TView>({
     [held, path, pushUrl, router],
   );
 
+  /**
+   * Applied continuously, as the analyst ticks boxes, with no button in
+   * between. Two things make that safe here and nowhere else:
+   *
+   *   1. It is guarded on `held`. Without a local dataset `apply` answers a
+   *      filter change with a server navigation, and doing that per checkbox
+   *      would be a request storm — so a caller must not turn live filtering
+   *      on until `local` says the browser can answer for itself.
+   *   2. History entries are coalesced (see `LIVE_BURST_MS`), because
+   *      `pushState` per interaction would bury whatever page the analyst
+   *      came from under a dozen near-identical filter states.
+   *
+   * The rebuild itself is a transition — React's own `startTransition`, not
+   * the hook's: it walks ~10k events and everything downstream of them and the
+   * checkbox must not wait for that to paint, but it is also not a navigation,
+   * and `pending` says a navigation is in flight.
+   */
+  const burstRef = useRef<number | null>(null);
+  const applyLive = useCallback(
+    (next: InvestigationFilters) => {
+      if (!held) return;
+      const query = serializeFilters(next);
+      const url = query ? `${path}?${query}` : path;
+      if (burstRef.current === null) window.history.pushState(null, "", url);
+      else {
+        window.clearTimeout(burstRef.current);
+        window.history.replaceState(null, "", url);
+      }
+      burstRef.current = window.setTimeout(() => {
+        burstRef.current = null;
+      }, LIVE_BURST_MS);
+      startTransition(() => setFilters(next));
+    },
+    [held, path],
+  );
+
   const reset = useCallback(() => {
     if (!held) {
       setFilters(DEFAULT_FILTERS);
@@ -154,5 +212,14 @@ export function useLocalFilters<TView>({
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  return { filters, view, apply, reset, pending, local: useLocal || Boolean(held), snapshot };
+  return {
+    filters,
+    view,
+    apply,
+    applyLive,
+    reset,
+    pending,
+    local: useLocal || Boolean(held),
+    snapshot,
+  };
 }

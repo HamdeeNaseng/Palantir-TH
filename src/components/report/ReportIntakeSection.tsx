@@ -2,15 +2,21 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconChevronUp, IconSpeakerphone } from "@tabler/icons-react";
+import { IconChevronUp, IconLock, IconSpeakerphone, IconClock } from "@tabler/icons-react";
 import ReportForm from "./ReportForm";
 import type { DistrictOption } from "@/lib/report-form";
 import type { ProvinceCode } from "@/lib/types";
 
 /**
- * Collapsed by default so the table — the thing this page is titled for —
- * is what greets an analyst. The form is one click away, not the first thing
- * on the page, for anyone here to actually file a report.
+ * The one thing on this page a member of the public came here to do.
+ *
+ * Still collapsed by default — the table below is what an analyst opens
+ * `/report` for, and this page serves both — but the closed state is now a
+ * proper invitation rather than a row: a plain-language promise of what
+ * happens, the two facts that decide whether someone starts at all (no name
+ * required, about two minutes), and a button big enough to hit with a thumb.
+ * A citizen who cannot tell that this page will take their report is a report
+ * that never gets filed.
  */
 export default function ReportIntakeSection({
   districtsByProvince,
@@ -29,22 +35,41 @@ export default function ReportIntakeSection({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-3 text-left"
+        className="flex w-full items-center gap-3.5 px-4 py-4 text-left sm:px-5"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[rgba(56,189,248,0.14)] text-azure">
-          <IconSpeakerphone size={16} stroke={1.8} />
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[rgba(56,189,248,0.14)] text-azure">
+          <IconSpeakerphone size={21} stroke={1.7} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-medium text-ink">แจ้งเหตุการณ์ใหม่</span>
-          <span className="block text-[11px] text-ink-muted">
-            พบเห็นเหตุการณ์ผิดปกติ? แจ้งข้อมูลได้ที่นี่ — ไม่ต้องระบุตัวตน
+          <span className="block text-[17px] leading-snug font-semibold text-ink sm:text-[16px]">
+            แจ้งเหตุการณ์ใหม่
+          </span>
+          <span className="mt-0.5 block text-[14px] leading-relaxed text-ink-dim">
+            พบเห็นเหตุการณ์ผิดปกติ? เล่าให้ฟังทีละคำถาม ตอบเท่าที่รู้ก็พอ
+          </span>
+          <span className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-muted">
+            <span className="inline-flex items-center gap-1.5">
+              <IconLock size={13} stroke={1.8} />
+              ไม่ต้องบอกชื่อหรือเบอร์โทร
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <IconClock size={13} stroke={1.8} />
+              ใช้เวลาประมาณ 2 นาที
+            </span>
           </span>
         </span>
-        <IconChevronUp
-          size={16}
-          stroke={1.8}
-          className={`shrink-0 text-ink-muted transition-transform ${open ? "" : "rotate-180"}`}
-        />
+        <span
+          className={`flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-3.5 text-[14px] font-medium ${
+            open ? "text-ink-dim" : "bg-[#1d4ed8] text-white"
+          }`}
+        >
+          {open ? "ปิด" : "เริ่มแจ้ง"}
+          <IconChevronUp
+            size={16}
+            stroke={2}
+            className={`transition-transform ${open ? "" : "rotate-180"}`}
+          />
+        </span>
       </button>
 
       {open && (
@@ -53,7 +78,7 @@ export default function ReportIntakeSection({
             key={resetKey}
             districtsByProvince={districtsByProvince}
             onSubmitted={() => {
-              // "ส่งรายงานอีกฉบับ" means what it says — stay open with a blank
+              // "แจ้งอีกเรื่อง" means what it says — stay open with a blank
               // form, not collapse back to the CTA the user already got past.
               setResetKey((k) => k + 1);
               router.refresh();

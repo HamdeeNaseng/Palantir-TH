@@ -105,45 +105,100 @@
   .num {
     font-variant-numeric: tabular-nums;
   }
+}
 
-  /* MapLibre popup, restyled to match the console rather than its default
-     white bubble. Class is set via the Popup `className` option. */
-  .palantir-popup .maplibregl-popup-content {
-    background: rgba(6, 13, 25, 0.96);
-    border: 1px solid rgba(56, 189, 248, 0.45);
-    border-radius: 5px;
-    padding: 8px 10px;
-    box-shadow: 0 6px 22px -8px rgba(0, 0, 0, 0.9);
-    font-family: var(--font-sans);
-    min-width: 178px;
-  }
-  .palantir-popup .maplibregl-popup-tip {
-    border-top-color: rgba(56, 189, 248, 0.45);
-    border-bottom-color: rgba(56, 189, 248, 0.45);
-  }
-  .palantir-popup .pp-title {
-    color: var(--color-ink);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.35;
-    margin-bottom: 2px;
-  }
-  .palantir-popup .pp-meta {
-    color: var(--color-ink-muted);
-    font-size: 10.5px;
-  }
-  .palantir-popup .pp-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: 10.5px;
-    color: var(--color-ink-dim);
-    margin-top: 3px;
-  }
-  .palantir-popup .pp-row b {
-    color: var(--color-ink);
-    font-variant-numeric: tabular-nums;
-  }
+/*
+ * ── MapLibre popup ───────────────────────────────────────────────────────
+ *
+ * Deliberately NOT inside `@layer components`.
+ *
+ * `maplibre-gl.css` is imported by `MapPanel` as a plain stylesheet, so its
+ * rules are unlayered — and unlayered declarations outrank every layered one
+ * regardless of specificity. That is why these overrides used to lose:
+ * `.palantir-popup .maplibregl-popup-content` sat in a layer, MapLibre's own
+ * `.maplibregl-popup-content { background: #fff }` did not, so the bubble
+ * rendered white while the text kept the console's near-white ink — the
+ * readout was there and unreadable. Keeping this block unlayered is what makes
+ * it apply at all; moving it back into `@layer` silently reverts the bug.
+ *
+ * The surface is therefore treated as what it actually is on screen: a light
+ * card. Every colour below is picked against white, not against the console
+ * floor — body text at ≥ 4.5:1 and the event-type line darkened through
+ * `color-mix` so a pale category still reads — gang yellow is 1.9:1 raw and
+ * 6.6:1 mixed, and the worst of the seventeen lands at 5.4:1.
+ */
+.palantir-popup .maplibregl-popup-content {
+  background: #ffffff;
+  border: 1px solid rgba(12, 46, 82, 0.24);
+  border-radius: 6px;
+  padding: 9px 11px;
+  box-shadow: 0 10px 26px -12px rgba(2, 8, 18, 0.75);
+  font-family: var(--font-sans);
+  min-width: 178px;
+}
+/* The tip is a triangle of solid border colour — it has to be the surface
+   colour, not the border colour, or it reads as a stray dark wedge. */
+.palantir-popup .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.palantir-popup .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.palantir-popup .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: #ffffff;
+}
+.palantir-popup .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.palantir-popup .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.palantir-popup .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: #ffffff;
+}
+.palantir-popup .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #ffffff;
+}
+.palantir-popup .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #ffffff;
+}
+.palantir-popup .pp-title {
+  color: #0b1b2e; /* 17.3:1 on white */
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+.palantir-popup .pp-meta {
+  color: #47607e; /* 6.5:1 */
+  font-size: 10.5px;
+}
+/*
+ * The event category keeps its hue — that colour is how the legend, the chips
+ * and the map dots all name it — but mixed toward ink until it clears contrast
+ * on a white card. The plain colour is the fallback for a browser without
+ * `color-mix`, which is why it is declared first.
+ */
+.palantir-popup .pp-type {
+  color: var(--pp-type-color, #47607e);
+  color: color-mix(in srgb, var(--pp-type-color, #47607e) 50%, #071522);
+  font-weight: 500;
+}
+.palantir-popup .pp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10.5px;
+  color: #52678a; /* 5.7:1 */
+  margin-top: 3px;
+}
+.palantir-popup .pp-row b {
+  color: #0f2540; /* 15.5:1 */
+  font-variant-numeric: tabular-nums;
+}
+/* The affordance for "this dot opens a case" — see `handleClick`. */
+.palantir-popup .pp-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(12, 46, 82, 0.16);
+  color: #0369a1; /* 5.9:1 */
+  font-size: 10.5px;
+  font-weight: 500;
 }
 
 /*
@@ -252,32 +307,119 @@
     color: var(--color-ink-muted);
   }
 
-  /* From `sm` up there is a mouse and a wider viewport, so the intake rejoins
-     the console's density instead of towering over the panels beside it. */
+  /*
+   * One tappable choice — an event category, drawn as a card rather than a
+   * `<select>` row.
+   *
+   * The control underneath is a real `<input type="radio">`, hidden with the
+   * clip-path recipe rather than `display: none` so it keeps its place in the
+   * accessibility tree, its keyboard arrow-key behaviour and its participation
+   * in the form. Everything visible is the `<span>` next to it, which is why
+   * every state below is expressed as a sibling selector.
+   */
+  .cz-choice {
+    display: block;
+    min-width: 0;
+  }
+  .cz-choice > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .cz-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 56px;
+    height: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(37, 66, 102, 0.9);
+    background: #0a1524;
+    font-size: 15px;
+    line-height: 1.35;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .cz-choice > input:checked + .cz-card {
+    border-color: var(--cz-accent, var(--color-azure));
+    background: color-mix(in srgb, var(--cz-accent, #38bdf8) 15%, #0a1524);
+  }
+  .cz-choice > input:focus-visible + .cz-card {
+    outline: 2px solid var(--color-azure);
+    outline-offset: 2px;
+  }
+  /* The chosen card is marked by a tick as well as by colour — colour alone
+     fails both a colour-blind reader and a phone screen in daylight. */
+  .cz-card .cz-tick {
+    opacity: 0;
+    margin-inline-start: auto;
+    color: var(--cz-accent, var(--color-azure));
+  }
+  .cz-choice > input:checked + .cz-card .cz-tick {
+    opacity: 1;
+  }
+
+  /* A quick answer to a question that usually has one — "วันนี้", "เมื่อวาน". */
+  .cz-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(37, 66, 102, 0.9);
+    background: #0a1524;
+    font-size: 14.5px;
+    color: var(--color-ink-dim);
+  }
+  .cz-chip[aria-pressed="true"] {
+    border-color: var(--color-azure);
+    background: rgba(56, 189, 248, 0.16);
+    color: var(--color-ink);
+  }
+  .cz-chip:focus-visible {
+    outline: 2px solid var(--color-azure);
+    outline-offset: 2px;
+  }
+
+  /*
+   * From `sm` up there is a mouse and a wider viewport — but there is not a
+   * different person. This block used to shrink the intake to console density
+   * (12.5 px type, 34 px rows) so it would sit quietly among the analyst
+   * panels; that traded the citizen's legibility for the page's tidiness, and
+   * the citizen is who this form is for. It now steps down only as far as a
+   * comfortable desktop form.
+   */
   @media (min-width: 640px) {
     .cz-field {
-      min-height: 34px;
-      border-radius: 6px;
-      padding: 6px 10px;
-      font-size: 12.5px;
+      min-height: 44px;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 15px;
     }
     .cz-select {
-      padding-inline-end: 30px;
-      background-position: right 7px center;
-      background-size: 16px 16px;
+      padding-inline-end: 34px;
+      background-position: right 9px center;
+      background-size: 18px 18px;
     }
     .cz-btn {
-      min-height: 34px;
-      padding: 0 12px;
-      border-radius: 6px;
-      font-size: 12.5px;
+      min-height: 46px;
+      padding: 0 18px;
+      font-size: 15px;
     }
     .cz-label {
-      margin-bottom: 4px;
-      font-size: 11.5px;
+      font-size: 14px;
     }
     .cz-hint {
-      font-size: 10.5px;
+      font-size: 12.5px;
     }
   }
 }
