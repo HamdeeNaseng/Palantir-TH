@@ -188,7 +188,13 @@
   color: #0f2540; /* 15.5:1 */
   font-variant-numeric: tabular-nums;
 }
-/* The affordance for "this dot opens a case" — see `handleClick`. */
+/*
+ * The bottom row of a popup — see `handleClick`.
+ *
+ * On the hover popup it is a hint about what a click will do; on the pinned
+ * one it is a real `<a>` to the case. Same row either way, so the pinned popup
+ * does not look like a different component when it replaces the hover one.
+ */
 .palantir-popup .pp-action {
   display: flex;
   align-items: center;
@@ -199,6 +205,36 @@
   color: #0369a1; /* 5.9:1 */
   font-size: 10.5px;
   font-weight: 500;
+}
+.palantir-popup a.pp-action:hover,
+.palantir-popup a.pp-action:focus-visible {
+  text-decoration: underline;
+}
+
+/*
+ * The pinned popup's close button. MapLibre's default is a large glyph that
+ * lands on top of the title; this pulls it into the corner and sizes it to the
+ * card, while keeping a target big enough to hit.
+ */
+.palantir-popup .maplibregl-popup-close-button {
+  top: 1px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  color: #52678a;
+  font-size: 15px;
+  line-height: 1;
+}
+.palantir-popup .maplibregl-popup-close-button:hover {
+  background: rgba(12, 46, 82, 0.08);
+  color: #0b1b2e;
+}
+/* The title has to clear it, or a long headline runs underneath the ×. */
+.palantir-popup .maplibregl-popup-close-button + .pp-title,
+.palantir-popup .maplibregl-popup-content:has(.maplibregl-popup-close-button) .pp-title {
+  padding-right: 18px;
 }
 
 /*

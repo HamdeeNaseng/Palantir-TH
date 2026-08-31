@@ -87,7 +87,19 @@ def load_events(db: Database) -> pd.DataFrame:
     ev = pd.DataFrame(rows)
     if ev.empty:
         raise ValueError(f"{EVENTS} is empty -- nothing to model")
-    ev["t"] = pd.to_datetime(ev["t"])
+    # `utc=True` rather than a bare parse, because `time.start` is not uniformly
+    # a BSON date: 48 documents from src_manual_research store the ISO-8601
+    # string instead. pymongo hands back a BSON date as tz-naive and those
+    # strings carry a `Z`, so a bare `to_datetime` sees both kinds in one column
+    # and raises "Cannot mix tz-aware with tz-naive values" -- ending the batch
+    # on the first read, before any of the expensive work.
+    #
+    # Normalising to UTC and then dropping the offset leaves the 10,252 real
+    # dates byte-identical to what pymongo already returned, and folds the
+    # strings onto the same naive-UTC scale rather than a second one. Everything
+    # downstream (`.dt.normalize()`, the hour/minute clock test, the min/max
+    # written back to Mongo) reads this column as naive UTC and is unchanged.
+    ev["t"] = pd.to_datetime(ev["t"], utc=True, format="mixed").dt.tz_localize(None)
     if ev["t"].isna().any():
         raise ValueError("every event must carry time.start; some do not")
     return ev

@@ -168,6 +168,34 @@ export interface Facility {
   editedBy: string | null;
 }
 
+/**
+ * The subset of a facility a map mark needs.
+ *
+ * Every map outside `/network` draws the same pin — halo, dot, glyph, hover
+ * popup — and none of them read the log overlay, the provenance or the opening
+ * hours. Narrowing here is what lets `/api/facilities` answer with ~40 KB
+ * instead of the whole network, and `Facility` is assignable to it, so
+ * `/network` keeps passing its full records to the shared overlay unchanged.
+ */
+export type FacilityMark = Pick<
+  Facility,
+  "id" | "kind" | "nameTh" | "nameEn" | "lng" | "lat" | "district" | "province" | "status"
+>;
+
+export function toFacilityMark(f: Facility): FacilityMark {
+  return {
+    id: f.id,
+    kind: f.kind,
+    nameTh: f.nameTh,
+    nameEn: f.nameEn,
+    lng: f.lng,
+    lat: f.lat,
+    district: f.district,
+    province: f.province,
+    status: f.status,
+  };
+}
+
 /** The fields a correction may change — everything else is provenance. */
 export interface FacilityEdit {
   name?: string;

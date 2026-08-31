@@ -109,4 +109,16 @@ export const COLLECTIONS = {
   flowCorridors: "flow_corridors",
   flowForecasts: "flow_forecasts",
   flowSegments: "flow_segments",
+
+  /**
+   * Output of the distance-pattern batch in `ml-server/`. Written only by
+   * `python run_distance_pattern.py`; this app reads and never writes.
+   *
+   * One document per case, keyed by `event_id` — the `event_candidates._id`
+   * foreign key — holding what lies around that case in each of 32 compass
+   * directions. Unlike the flow collections there is no `live` pointer: runs
+   * are resolved by taking the newest `computed_at` for the case asked for.
+   * See `src/server/distance-pattern.ts`.
+   */
+  caseDistancePatterns: "result_batch_processing",
 } as const;

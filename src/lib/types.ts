@@ -189,6 +189,32 @@ export function geoPrecisionRadiusM(value: string | null | undefined): number {
   return GEO_PRECISION_RADIUS_M[asGeoPrecision(value)];
 }
 
+/**
+ * A stored `severity` as a level, or `null` when the record does not carry one.
+ *
+ * The field is declared `1..5` and is a number for almost every document, but
+ * part of the corpus stores a word instead — info / low / medium / high /
+ * critical. A string survives every `!== null` check in the pipeline and then
+ * fails silently at the point of use: `SEVERITY_COLOR["high"]` is `undefined`,
+ * so the chip renders blank, and a MapLibre paint expression interpolating on
+ * it gets a non-number.
+ *
+ * Words are read as *unreported*, not translated. The vocabulary has five
+ * terms and the scale has five levels, so a mapping looks obvious, but nothing
+ * documents which term is which: the scale reads ต่ำ / ปานกลาง / สูง / สูงมาก /
+ * วิกฤต, and deciding whether "high" is 3 or 4 would resize and recolour the
+ * dot on the strength of a guess. `null` already means "the source did not
+ * say", which is the one thing that is certainly true.
+ *
+ * Mirrored by `_severity()` in `ml-server/app/pattern_batch.py`, which logs how
+ * many it drops so the drift stays visible.
+ */
+export function asSeverityLevel(value: unknown): SeverityLevel | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5
+    ? (value as SeverityLevel)
+    : null;
+}
+
 /** `source_registry` — the catalogue of every ingestion source. */
 export interface SourceRegistryDoc {
   _id: string;
