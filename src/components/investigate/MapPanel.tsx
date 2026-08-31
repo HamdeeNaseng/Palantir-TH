@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Map, {
   AttributionControl,
   Layer,
@@ -22,6 +23,8 @@ import {
   IconPlayerPlay,
   IconPlus,
   IconChevronRight,
+  IconBuildingCommunity,
+  IconCompass,
   IconRoute,
   IconSatellite,
   IconStack2,
@@ -44,6 +47,23 @@ import {
   toFlowFeatureCollection,
 } from "@/lib/flow/map-layers";
 import type { FlowUnavailableReason } from "@/lib/flow/use-flow-legs";
+import type { FacilityMark } from "@/lib/facilities";
+import { FacilityBadgeSprite } from "@/lib/map-facility-icons";
+import {
+  FACILITY_OVERLAY_ANCHOR_ID,
+  FACILITY_OVERLAY_ANCHOR_LAYER,
+  FacilityHoverPopupBody,
+  FacilityLegend,
+  FacilityOverlay,
+  facilityHitLayers,
+  facilityIndex,
+  facilityHref,
+  findFacilityHit,
+  useFacilityBadges,
+} from "@/lib/map-facility-layer";
+import { useFacilities } from "@/lib/use-facilities";
+import { useDistancePattern } from "@/lib/use-distance-pattern";
+import { DistancePatternCard, DistancePatternLayers } from "@/lib/map-distance-pattern";
 import {
   SATELLITE_DEFAULT_ON,
   SATELLITE_SOURCE_ID,
@@ -54,7 +74,7 @@ import {
 } from "@/lib/basemap";
 import { EVENT_FAMILY_LABEL, EVENT_TYPE_LABEL } from "@/lib/labels";
 import { EVENT_FAMILIES, typesInFamily, type EventType } from "@/lib/types";
-import type { EventFeatureCollection } from "@/server/shared-events";
+import type { EventFeature, EventFeatureCollection } from "@/server/shared-events";
 
 /**
  * Investigation map.
@@ -153,14 +173,23 @@ const VIEWS = ["แผนที่", "ความหนาแน่น", "ไ�
 type View = (typeof VIEWS)[number];
 
 /** Colour ramp shared by the heatmap layer. */
+/**
+ * Alphas top out at 0.62 rather than 0.95.
+ *
+ * The ramp is multiplied by `heatmap-opacity`, so the old 0.95 core was very
+ * nearly opaque wherever density saturated — which over the four provinces is
+ * most of the map. The hue progression is what carries the reading; the alpha
+ * only needs to be enough to see it, and holding the core translucent is what
+ * lets the imagery and the district lines stay legible underneath.
+ */
 const HEAT_RAMP: ExpressionSpecification = [
   "interpolate", ["linear"], ["heatmap-density"],
   0, "rgba(0,0,0,0)",
-  0.2, "rgba(14,165,233,0.45)",
-  0.4, "rgba(34,211,238,0.6)",
-  0.6, "rgba(251,191,36,0.75)",
-  0.8, "rgba(249,115,22,0.85)",
-  1, "rgba(239,68,68,0.95)",
+  0.2, "rgba(14,165,233,0.30)",
+  0.4, "rgba(34,211,238,0.40)",
+  0.6, "rgba(251,191,36,0.50)",
+  0.8, "rgba(249,115,22,0.56)",
+  1, "rgba(239,68,68,0.62)",
 ];
 
 /**
@@ -271,6 +300,11 @@ function baseStyle(): StyleSpecification {
           "line-opacity": 0.95,
         },
       },
+
+      // Draws nothing. Everything facility-related mounts below it and every
+      // event layer above it, whatever order the two finish loading in — see
+      // `FACILITY_OVERLAY_ANCHOR_LAYER`.
+      FACILITY_OVERLAY_ANCHOR_LAYER,
     ],
   };
 }
@@ -295,22 +329,87 @@ const HEAT_LAYER = {
     "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 6, 0.7, 12, 2.4],
     "heatmap-color": HEAT_RAMP,
     "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 6, 14, 12, 42],
-    "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.85, 12, 0.35],
+    /**
+     * Fades out as the map zooms in, and much earlier than it used to.
+     *
+     * Zoomed out the heatmap is the content — there is nothing underneath it
+     * worth reading, so it stays strong. Zoomed in it becomes context for the
+     * detail the analyst came for (imagery, boundaries, marks, spokes), and
+     * the old curve held 0.85 all the way to z10 and 0.35 at z12, which buried
+     * exactly the view where the detail matters most.
+     */
+    "heatmap-opacity": [
+      "interpolate", ["linear"], ["zoom"],
+      8, 0.62,
+      10, 0.38,
+      11.5, 0.16,
+    ],
   },
 } satisfies LayerProps;
 
-// Positional uncertainty: a district centroid must not read like a GPS fix, so
-// the halo is sized from precision_m in real metres.
+/**
+ * Positional uncertainty: a district centroid must not read like a GPS fix, so
+ * the halo is sized from precision_m in real metres.
+ *
+ * **The fill is almost nil on purpose, and the ring carries the meaning.** The
+ * corpus puts ~44 events on each district centroid, so this layer draws ~44
+ * identical circles on the same pixels; alpha compounds as 1-(1-a)^n, which
+ * turned the old 0.07 fill into a 96% opaque disc and the four provinces into
+ * one flat red field. At 0.014 the same stack lands near 45%, and where two
+ * districts' 8 km halos merely overlap it stays a wash rather than a wall.
+ *
+ * The stroke is raised to compensate. What this layer has to say is "the true
+ * position is somewhere inside this boundary" — that is a ring, and a ring is
+ * also the part that does not compound, because only its own pixels stack.
+ */
 const UNCERTAINTY_LAYER = {
   id: "events-uncertainty",
   type: "circle",
+  // Below z9 the halos are a few pixels and say nothing; by z12 they are
+  // viewport-scale and say nothing. The band between is where the shape reads.
+  // z12 is also where the heatmap stops, which gives the map one rule rather
+  // than two: below it the washes give context, above it the imagery and the
+  // marks have the screen to themselves.
   minzoom: 9,
+  maxzoom: 12.5,
   paint: {
     "circle-color": ["get", "color"],
-    "circle-opacity": 0.07,
+    /**
+     * Fades to almost nothing as the circles grow.
+     *
+     * The radius scales exponentially with zoom, so an 8 km halo is ~67 px
+     * across at z9 and larger than the viewport by z14. Past the point where
+     * its edge is off-screen a fill says nothing a reader can act on — it is
+     * just a tint over everything — while the ring still marks where the
+     * uncertainty ends. So the fill is spent early and given up late.
+     */
+    "circle-opacity": [
+      "interpolate", ["linear"], ["zoom"],
+      9, 0.05,
+      11, 0.03,
+      12.5, 0,
+    ],
     "circle-stroke-color": ["get", "color"],
-    "circle-stroke-opacity": 0.22,
-    "circle-stroke-width": 0.6,
+    /**
+     * Held to z12, then gone.
+     *
+     * Measured, not guessed: at z12.8 an 8 km halo is ~1,300 px across, so a
+     * couple of hundred of them cross every pixel and even a 0.1 stroke
+     * compounds to solid — the fill was never the only offender. A ring whose
+     * shape you cannot see has stopped saying "somewhere inside this" and
+     * started saying nothing.
+     *
+     * The claim is not lost at those zooms, it moves: the pinned case draws
+     * its own search ring, and its popup states ความละเอียดพิกัด outright,
+     * which is the one event a reader at street zoom is actually asking about.
+     */
+    "circle-stroke-opacity": [
+      "interpolate", ["linear"], ["zoom"],
+      9, 0.42,
+      11, 0.34,
+      12.5, 0,
+    ],
+    "circle-stroke-width": 0.8,
     // metres -> pixels at this latitude, per MapLibre's zoom scaling.
     "circle-radius": [
       "interpolate", ["exponential", 2], ["zoom"],
@@ -430,6 +529,17 @@ interface HoverInfo {
   props: Record<string, string | number>;
 }
 
+/**
+ * The case a click pinned open.
+ *
+ * Carries the id as well as the properties, because unlike the hover popup
+ * this one has to survive the pointer moving away — it is compared against the
+ * next click to decide open-or-close, and it renders a link.
+ */
+interface SelectedCase extends HoverInfo {
+  id: string;
+}
+
 interface BoundaryInfo {
   lng: number;
   lat: number;
@@ -516,7 +626,46 @@ export default function MapPanel({
   // Sticky: once the analyst has been in close, the files are cached anyway.
   const [detail, setDetail] = useState(false);
   const [hover, setHover] = useState<HoverInfo | null>(null);
+  const [facilityHover, setFacilityHover] = useState<FacilityMark | null>(null);
   const [boundary, setBoundary] = useState<BoundaryInfo | null>(null);
+  /**
+   * The response network, on by default.
+   *
+   * Internal state rather than a prop: the controlled/uncontrolled split on
+   * this component exists for the playhead, because `/events` owns one in a
+   * separate Timeline panel. Nothing outside reads or drives this layer, and a
+   * prop would turn the bare `<MapPanel events={...} />` on `/investigate`
+   * into an uncontrolled case of a second axis for no gain.
+   */
+  const [showFacilities, setShowFacilities] = useState(true);
+  /**
+   * The 32-direction distance pattern, on by default.
+   *
+   * On, because clicking a dot is now what asks for it — a click that drew
+   * nothing until the analyst had found a toggle first would just look broken.
+   * The switch stays so the spokes can be hidden on a dense view without
+   * giving up the pinned label, which is the other half of the same click.
+   */
+  const [showPattern, setShowPattern] = useState(true);
+  const [patternEventId, setPatternEventId] = useState<string | null>(null);
+  /** The case a click pinned. Independent of `showPattern`: hiding the spokes
+   *  must not also take away the label. */
+  const [selected, setSelected] = useState<SelectedCase | null>(null);
+  const {
+    facilities,
+    loading: facilitiesLoading,
+    failed: facilitiesFailed,
+  } = useFacilities(showFacilities);
+  const {
+    pattern,
+    loading: patternLoading,
+    failed: patternFailed,
+  } = useDistancePattern(showPattern ? patternEventId : null);
+  const { spriteRef: facilitySpriteRef, badgesReady: facilityBadgesReady } = useFacilityBadges(
+    mapRef,
+    ready,
+  );
+  const facilityById = useMemo(() => facilityIndex(facilities), [facilities]);
   const timeRange = useMemo(() => {
     const timestamps = events.features.map((feature) => feature.properties.ts);
     const now = Date.now();
@@ -546,8 +695,12 @@ export default function MapPanel({
   // queryRenderedFeatures complain, so the badge joins this list only once it
   // is actually mounted.
   const interactiveLayerIds = useMemo(
-    () => (badgesReady ? [...INTERACTIVE_LAYERS, EVENT_BADGE_LAYER.id] : INTERACTIVE_LAYERS),
-    [badgesReady],
+    () => [
+      ...INTERACTIVE_LAYERS,
+      ...(badgesReady ? [EVENT_BADGE_LAYER.id] : []),
+      ...(showFacilities ? facilityHitLayers(facilityBadgesReady) : []),
+    ],
+    [badgesReady, showFacilities, facilityBadgesReady],
   );
 
   /**
@@ -563,6 +716,39 @@ export default function MapPanel({
     () => ["all", [">", ["get", "precision_m"], 500], timeFilter],
     [timeFilter],
   );
+
+  /**
+   * One halo per distinct position, not one per event.
+   *
+   * Positional uncertainty is a property of the *coordinate*, not of each
+   * record standing on it — and this corpus puts roughly 44 events on every
+   * district centroid, one of them 781. Drawn from the event collection the
+   * layer therefore stacked 44 identical circles on the same pixels, where
+   * alpha compounds as 1-(1-a)^n: at a 0.13 stroke that is 99.7% opaque, so
+   * the wash ended up measuring how many events shared a centroid rather than
+   * how uncertain the position was, and no opacity low enough to fix it left a
+   * visible ring for the positions holding a single event.
+   *
+   * Deduplicating drops ~9,700 circles to ~228 and makes the alpha mean what
+   * it says. The earliest timestamp at each position is kept so the halo
+   * appears during replay as soon as anything there does, and the winning
+   * feature's colour stands for the position — which is one honest colour
+   * instead of forty-four stacked ones.
+   */
+  const uncertaintyData = useMemo(() => {
+    // A plain object, not `new Map()`: react-map-gl's `Map` is imported into
+    // this module under that very name, and the shadowed constructor fails in
+    // a way that names neither of them. `map-facility-layer.tsx` hit the same
+    // trap and left the same note.
+    const byPosition: Record<string, EventFeature> = {};
+    for (const f of events.features) {
+      const [lng, lat] = f.geometry.coordinates;
+      const key = `${lng.toFixed(5)},${lat.toFixed(5)}`;
+      const held = byPosition[key];
+      if (!held || f.properties.ts < held.properties.ts) byPosition[key] = f;
+    }
+    return { type: "FeatureCollection" as const, features: Object.values(byPosition) };
+  }, [events]);
 
   const timePathData = useMemo(
     () => ({
@@ -633,14 +819,49 @@ export default function MapPanel({
 
       onSelectFeature?.(point ? String(point.properties.id) : null);
 
-      // A dot is the case, so clicking it opens the case. The popup can't
-      // carry the link itself: it is driven by hover, and moving the pointer
-      // off the dot to reach it takes the pointer off the canvas, which closes
-      // it — the map's own click is the only reachable target.
+      // Events first, facilities second, the polygon underneath last: the
+      // event mark draws above the facility mark, so the topmost visible
+      // target is the one that has to answer — and on these two pages the
+      // subject is the incident, not the station beside it.
+
+      // A dot is a case, and clicking it keeps the analyst on the map: it pins
+      // the case's label and draws that case's 32 directions around it.
+      //
+      // It used to navigate straight to `/cases/<id>`, which made the primary
+      // gesture on the map a one-way exit — the surroundings the analyst was
+      // reading disappeared the moment they asked about one of them. The case
+      // page is still one click away, from a link inside the pinned label,
+      // which is also reachable in a way the hover popup never was.
+      //
+      // Any dot replaces whatever was showing, including the one already
+      // pinned. It is deliberately not a toggle: with the label closable on
+      // its own, a second click on the same dot is how the analyst asks for
+      // that label back, and a toggle would instead wipe the spokes they were
+      // still reading. Clearing is the empty-map click below, which is one
+      // gesture for one meaning.
       if (point) {
-        router.push(caseHref(String(point.properties.id)));
+        const id = String(point.properties.id);
+        setSelected({ id, lng: e.lngLat.lng, lat: e.lngLat.lat, props: point.properties });
+        setPatternEventId(id);
         return;
       }
+
+      // Returns before the province branch, so clicking a pin never also
+      // leaves a boundary popup open behind the navigation. Nothing is cleared
+      // on the way out: the page is about to change anyway, and clearing would
+      // only be visible as a flicker.
+      const facility = findFacilityHit(e.features, facilityById, facilityBadgesReady);
+      if (facility) {
+        router.push(facilityHref(facility.id));
+        return;
+      }
+
+      // Anything that is not a mark is the map itself, and clicking the map
+      // puts it back to rest — label and spokes both. This is the only way to
+      // clear the overlay, which is what makes it predictable: the analyst
+      // never has to remember which dot was the pinned one to get rid of it.
+      setSelected(null);
+      setPatternEventId(null);
 
       if (province) {
         const props = province.properties as Record<string, string>;
@@ -653,7 +874,7 @@ export default function MapPanel({
         });
       }
     },
-    [onSelectFeature, router],
+    [onSelectFeature, router, facilityById, facilityBadgesReady],
   );
 
   /**
@@ -684,20 +905,26 @@ export default function MapPanel({
         reportHover(null);
         // Same value bails out of a re-render on React's own identity check.
         setHover(null);
+        // One popup at a time. A pin sitting under an event dot is a normal
+        // arrangement, and two boxes stacked on the cursor read as a bug.
+        const facility = findFacilityHit(e.features, facilityById, facilityBadgesReady);
+        setFacilityHover((prev) => (prev?.id === facility?.id ? prev : facility));
         return;
       }
       const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number];
       const props = f.properties as Record<string, string | number>;
       reportHover(String(props.id));
+      setFacilityHover(null);
       // Returning `prev` unchanged for the same dot keeps the popup from
       // re-rendering on every pixel of movement across it.
       setHover((prev) => (prev?.props.id === props.id ? prev : { lng, lat, props }));
     },
-    [reportHover],
+    [reportHover, facilityById, facilityBadgesReady],
   );
 
   const handleMouseLeave = useCallback(() => {
     setHover(null);
+    setFacilityHover(null);
     reportHover(null);
   }, [reportHover]);
 
@@ -773,7 +1000,7 @@ export default function MapPanel({
         attributionControl={false}
         dragRotate={false}
         interactiveLayerIds={interactiveLayerIds}
-        cursor={hover ? "pointer" : undefined}
+        cursor={hover || facilityHover ? "pointer" : undefined}
         onLoad={(e) => {
           setReady(true);
           setDetail(e.target.getZoom() >= DETAIL_MIN_ZOOM);
@@ -803,16 +1030,56 @@ export default function MapPanel({
           </>
         )}
 
-        <Source id="events" type="geojson" data={events}>
-          <Layer
-            {...HEAT_LAYER}
-            filter={timeFilter}
-            layout={{ visibility: view !== "แผนที่" ? "visible" : "none" }}
+        {/* Under the events, above the boundaries — see the anchor layer. */}
+        {showFacilities && (
+          <FacilityOverlay
+            facilities={facilities}
+            badgesReady={facilityBadgesReady}
+            beforeId={FACILITY_OVERLAY_ANCHOR_ID}
           />
+        )}
+
+        {/* Its own source, holding one feature per position — see
+            `uncertaintyData`. Same `beforeId` as the heatmap, so both washes
+            still sit under every outline and mark. */}
+        <Source id="events-positions" type="geojson" data={uncertaintyData}>
           <Layer
             {...UNCERTAINTY_LAYER}
+            beforeId="district-outline"
             filter={uncertaintyFilter}
             layout={{ visibility: view === "ไฮบริด" ? "visible" : "none" }}
+          />
+        </Source>
+
+        <Source id="events" type="geojson" data={events}>
+          {/*
+            The two red washes, pinned as low as they can go and still be read.
+
+            Both are area fills over the whole corpus — the heatmap at 0.85
+            opacity, and the uncertainty halos at 0.07 each but hundreds deep,
+            which compounds to the same solid red. Added in source order they
+            landed on top of the entire base style, burying the imagery, the
+            boundary lines, the facility marks and the pattern spokes beneath
+            them. `district-outline` puts both under every outline and every
+            mark on the map, which is the only way a zoomed-in view stays
+            readable.
+
+            One step lower — `thailand-fill`, immediately above the satellite
+            layer — looks the same over imagery (`SATELLITE_FILLS` drops those
+            fills to 0 and 0.12 there) but is wrong on the plain basemap: the
+            province fill is opaque enough to bury the heat, and the whole
+            content of the ความหนาแน่น view with it. Above the two flat fills
+            and below everything else is the placement that holds in both.
+
+            Declared heat-first so it stays under the halos, as it always was:
+            `beforeId` inserts at the same slot, so the later of the two lands
+            on top of the earlier.
+          */}
+          <Layer
+            {...HEAT_LAYER}
+            beforeId="district-outline"
+            filter={timeFilter}
+            layout={{ visibility: view !== "แผนที่" ? "visible" : "none" }}
           />
           <Layer
             {...POINT_LAYER}
@@ -832,6 +1099,21 @@ export default function MapPanel({
             />
           )}
         </Source>
+
+        {/*
+          Above the uncertainty halos and the facility marks they point at,
+          below the incident dots.
+
+          The dots stay on top because the case is the subject and a spoke is
+          context about it. Everything else the spokes cross is either a wash
+          (the halos) or the mark at the far end of the line, and a line that
+          disappeared under the thing it connects to would be worse than one
+          drawn over it.
+
+          Declared after the events source so `events-point` exists by the time
+          these mount; MapLibre throws on a `beforeId` it cannot find.
+        */}
+        {showPattern && <DistancePatternLayers pattern={pattern} beforeId={POINT_LAYER.id} />}
 
         {/* Rendered only when a parent actually supplies these —
             `/investigate`'s plain usage never creates them, so its map is
@@ -882,9 +1164,79 @@ export default function MapPanel({
               <b>{PRECISION_LABEL[String(hover.props.precision)] ?? "ไม่ระบุ"}</b>
             </div>
             <div className="pp-action">
-              คลิกเพื่อเปิดหน้าเคส
+              คลิกเพื่อปักหมุดและดูรูปแบบระยะทาง
               <IconChevronRight size={11} stroke={2.2} aria-hidden />
             </div>
+          </Popup>
+        )}
+
+        {/*
+          The pinned label. Same fields as the hover popup, plus the two things
+          hover cannot offer: it stays put when the pointer leaves, so it can
+          carry a real link to the case, and it has a close button.
+
+          Rendered after the hover popup so that while the pointer still rests
+          on the dot just clicked, the pinned one is the copy on top.
+        */}
+        {selected && (
+          <Popup
+            longitude={selected.lng}
+            latitude={selected.lat}
+            closeButton
+            closeOnClick={false}
+            // Closes the label and leaves the spokes drawn. The two answer
+            // different questions — "what happened here" and "what is around
+            // it" — and the label is the one that sits over the map it
+            // describes, so dismissing it to see underneath must not also
+            // throw away the pattern that was the reason for looking.
+            onClose={() => setSelected(null)}
+            className="palantir-popup"
+            offset={10}
+          >
+            <div className="pp-title">{String(selected.props.title)}</div>
+            <PopupType type={String(selected.props.type) as EventType} />
+            <div className="pp-meta">
+              อ.{String(selected.props.district)} จ.{String(selected.props.province)}
+            </div>
+            <div className="pp-meta">{hoverWhen(selected)}</div>
+            <div className="pp-row">
+              <span>ความรุนแรง</span>
+              <b>{selected.props.severity}/5</b>
+            </div>
+            <div className="pp-row">
+              <span>ความเชื่อมั่น</span>
+              <b>{selected.props.confidence}%</b>
+            </div>
+            <div className="pp-row">
+              <span>ความละเอียดพิกัด</span>
+              <b>{PRECISION_LABEL[String(selected.props.precision)] ?? "ไม่ระบุ"}</b>
+            </div>
+            {showPattern && pattern && (
+              <div className="pp-row">
+                <span>หน่วยงานรอบจุด</span>
+                <b>{pattern.summary.coverage}/32 ทิศ</b>
+              </div>
+            )}
+            {/* A real link, not a router.push on the row: the case page is
+                worth opening in a new tab, and middle-click and ⌘-click only
+                work on an anchor. */}
+            <Link href={caseHref(selected.id)} className="pp-action" prefetch={false}>
+              เปิดหน้าเคส
+              <IconChevronRight size={11} stroke={2.2} aria-hidden />
+            </Link>
+          </Popup>
+        )}
+
+        {facilityHover && (
+          <Popup
+            longitude={facilityHover.lng}
+            latitude={facilityHover.lat}
+            closeButton={false}
+            closeOnClick={false}
+            className="palantir-popup"
+            offset={12}
+          >
+            <FacilityHoverPopupBody facility={facilityHover} action="คลิกเพื่อเปิดหน้าเครือข่าย" />
           </Popup>
         )}
 
@@ -926,7 +1278,10 @@ export default function MapPanel({
           ))}
         </div>
 
-        <div className="pointer-events-auto absolute top-11 left-2 lg:left-3">
+        {/* Above the zoom cluster below it: the open list now reaches past
+            `top-24`, and without this the later-in-DOM buttons paint over the
+            bottom row and swallow the click that lands on it. */}
+        <div className="pointer-events-auto absolute top-11 left-2 z-10 lg:left-3">
           <button
             type="button"
             onClick={() => setLayersOpen((v) => !v)}
@@ -958,6 +1313,52 @@ export default function MapPanel({
                   </span>
                   <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
                     ดึงไทล์จากผู้ให้บริการภายนอก — เปิดเมื่อต้องการเท่านั้น
+                  </span>
+                </span>
+              </label>
+
+              <label className="mt-2 flex cursor-pointer items-start gap-2 text-[11.5px] text-ink-dim hover:text-ink">
+                <input
+                  type="checkbox"
+                  checked={showFacilities}
+                  onChange={() => setShowFacilities((v) => !v)}
+                  className="mt-[2px] h-3.5 w-3.5 shrink-0 appearance-none rounded-[3px] border border-[rgba(90,140,190,0.7)] bg-transparent checked:border-azure checked:bg-azure checked:after:block checked:after:text-[10px] checked:after:leading-[13px] checked:after:font-bold checked:after:text-[#04070e] checked:after:content-['✓']"
+                />
+                <span>
+                  <span className="flex items-center gap-1.5 text-ink">
+                    <IconBuildingCommunity size={13} stroke={1.7} />
+                    หน่วยงาน/เครือข่าย
+                    {facilitiesLoading && <span className="text-ink-muted">(กำลังโหลด…)</span>}
+                    {facilitiesFailed && <span className="text-amber">(โหลดไม่สำเร็จ)</span>}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
+                    ด่านตรวจ ตำรวจ กู้ภัย ดับเพลิง ศูนย์อพยพ และโรงพยาบาล — แสดงทั้งหมดเสมอ
+                    ไม่ขึ้นกับตัวกรองเหตุการณ์
+                  </span>
+                </span>
+              </label>
+
+              <label
+                className="mt-2 flex cursor-pointer items-start gap-2 text-[11.5px] text-ink-dim hover:text-ink"
+                data-testid="distance-pattern-toggle"
+              >
+                <input
+                  type="checkbox"
+                  checked={showPattern}
+                  onChange={() => setShowPattern((v) => !v)}
+                  className="mt-[2px] h-3.5 w-3.5 shrink-0 appearance-none rounded-[3px] border border-[rgba(90,140,190,0.7)] bg-transparent checked:border-azure checked:bg-azure checked:after:block checked:after:text-[10px] checked:after:leading-[13px] checked:after:font-bold checked:after:text-[#04070e] checked:after:content-['✓']"
+                />
+                <span>
+                  <span className="flex items-center gap-1.5 text-ink">
+                    <IconCompass size={13} stroke={1.7} />
+                    รูปแบบระยะทาง 32 ทิศ
+                    {patternLoading && <span className="text-ink-muted">(กำลังโหลด…)</span>}
+                    {patternFailed && <span className="text-amber">(โหลดไม่สำเร็จ)</span>}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-muted">
+                    {showPattern
+                      ? "คลิกจุดเหตุการณ์เพื่อปักหมุด และดูว่าแต่ละทิศมีหน่วยงานใดใกล้ที่สุด — สีเส้นตามชนิดหน่วยงาน · ปิดป้ายได้โดยเส้นยังอยู่ · คลิกที่ว่างบนแผนที่เพื่อล้างทั้งหมด"
+                      : "ปิดอยู่ — คลิกจุดเหตุการณ์ยังปักหมุดแสดงป้ายเคสได้ แต่จะไม่วาดเส้น 32 ทิศ"}
                   </span>
                 </span>
               </label>
@@ -1037,6 +1438,27 @@ export default function MapPanel({
 
         {/* Legend */}
         <div className="pointer-events-auto absolute top-14 right-2 flex max-h-[calc(100%-4rem)] w-[152px] flex-col overflow-y-auto rounded border border-[rgba(56,100,150,0.45)] bg-[rgba(6,13,25,0.88)] p-2.5 lg:top-2.5 lg:right-2.5 lg:max-h-[calc(100%-1.25rem)] lg:w-[172px]">
+          {/* Above the symbol key, because it describes the one thing the
+              analyst just asked for — and it is the only part of the rail that
+              changes with a click. Mounted only when there is something to
+              say, so an empty block never pushes the key down. */}
+          {showPattern && (patternLoading || pattern) && (
+            <DistancePatternCard
+              pattern={pattern}
+              loading={patternLoading}
+              onClear={() => setPatternEventId(null)}
+            />
+          )}
+          {/* The layer is on, a case is chosen, and the batch simply has no
+              row for it. Said plainly rather than left as a map that did
+              nothing when clicked. */}
+          {showPattern && patternEventId && !patternLoading && !pattern && !patternFailed && (
+            <p className="mb-2 border-b border-amber/30 pb-2 text-[10px] leading-relaxed text-amber">
+              ยังไม่มีรูปแบบระยะทางของเคสนี้ — รัน{" "}
+              <code className="font-mono">run_distance_pattern.py</code> ใน ml-server/ ก่อน
+            </p>
+          )}
+
           <button
             type="button"
             onClick={() => setLegendOpen((v) => !v)}
@@ -1124,6 +1546,7 @@ export default function MapPanel({
               <MAP_LAYER_ICON.uncertainty_boundary size={11} strokeWidth={2} className="shrink-0 text-ink-muted" aria-hidden />
               ขอบเขตความคลาดเคลื่อน
             </li>
+            {showFacilities && <FacilityLegend variant="inline" />}
           </ul>
         </div>
 
@@ -1175,6 +1598,7 @@ export default function MapPanel({
       {/* Never shown. The source React renders the type glyphs into so they can
           be rasterised for the map — see `map-event-icons.tsx`. */}
       <EventBadgeSprite ref={spriteRef} />
+      <FacilityBadgeSprite ref={facilitySpriteRef} />
     </section>
   );
 }

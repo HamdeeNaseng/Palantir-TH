@@ -2,7 +2,8 @@ import { COLLECTIONS, getDb } from "@/lib/mongodb";
 import { EVENT_COLOR } from "@/lib/palette";
 import { RANGE_DAYS, type InvestigationFilters } from "@/lib/filters";
 import { TRUSTED_SCORE_FLOOR } from "@/lib/snapshot";
-import { asGeoPrecision, geoPrecisionRadiusM } from "@/lib/types";
+import { msOr } from "@/lib/datetime";
+import { asGeoPrecision, asSeverityLevel, geoPrecisionRadiusM } from "@/lib/types";
 import type {
   CaseDoc,
   CitizenReportDoc,
@@ -182,10 +183,16 @@ export function matchedEvents(
     if (except !== "verification" && filters.verification.length && !filters.verification.includes(e.verification)) {
       return false;
     }
-    if (except !== "source" && filters.sourceId !== "all" && !e.corroborating_sources.includes(filters.sourceId)) {
+    // `?? []` throughout: a handful of ingested documents omit these arrays
+    // entirely rather than sending them empty. An event that lists no source
+    // genuinely matches neither a source filter nor a trusted-only filter, so
+    // absence and emptiness give the same answer here — and neither should be
+    // a 500. See `msOrNull` in `@/lib/datetime` for the same problem in dates.
+    const sources = e.corroborating_sources ?? [];
+    if (except !== "source" && filters.sourceId !== "all" && !sources.includes(filters.sourceId)) {
       return false;
     }
-    if (except !== "trusted" && filters.trustedOnly && !e.corroborating_sources.some((id) => trusted.has(id))) {
+    if (except !== "trusted" && filters.trustedOnly && !sources.some((id) => trusted.has(id))) {
       return false;
     }
     return true;
@@ -216,22 +223,31 @@ export function toEventFeature(e: EventCandidateDoc): EventFeature | null {
       // MapLibre paint expressions cannot read null, so an unreported
       // severity is drawn at the neutral middle rather than omitted. The
       // `severity_known` flag keeps the distinction visible to the UI.
-      severity: e.severity ?? UNKNOWN_SEVERITY_FALLBACK,
-      severity_known: e.severity !== null,
+      // Coerced, not just null-checked: part of the corpus stores a word here,
+      // which passes `!== null` and then reaches a numeric paint expression.
+      severity: asSeverityLevel(e.severity) ?? UNKNOWN_SEVERITY_FALLBACK,
+      severity_known: asSeverityLevel(e.severity) !== null,
       confidence: e.confidence,
-      ts: e.time.start.getTime(),
+      // Coerced, not trusted: one string timestamp in the corpus would
+      // otherwise throw here and 500 the whole map. An unreadable one is
+      // placed at load time, which puts it at the end of the replay rather
+      // than at the 1970 end of the scrubber. See `msOr`.
+      ts: msOr(e.time.start, Date.now()),
       title: e.event.title,
       district: e.location.district,
       province: e.location.province,
       precision: asGeoPrecision(e.location.geo_precision),
       precision_m: geoPrecisionRadiusM(e.location.geo_precision),
       color: EVENT_COLOR[e.event.type],
-      killed_known: e.casualties.killed !== null,
-      killed: e.casualties.killed ?? 0,
-      injured_known: e.casualties.injured !== null,
-      injured: e.casualties.injured ?? 0,
+      // An absent `casualties` object reads exactly like one reporting null:
+      // the source did not say. `killed_known` already carries that
+      // distinction to the UI, so nothing here has to invent a number.
+      killed_known: e.casualties?.killed != null,
+      killed: e.casualties?.killed ?? 0,
+      injured_known: e.casualties?.injured != null,
+      injured: e.casualties?.injured ?? 0,
       verification: e.verification,
-      sources_count: e.corroborating_sources.length,
+      sources_count: e.corroborating_sources?.length ?? 0,
       media_count: e.media?.length ?? 0,
       actors_count: e.actors?.length ?? 0,
       targets_count: e.targets?.length ?? 0,

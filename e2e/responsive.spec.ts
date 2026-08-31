@@ -86,7 +86,13 @@ test("applying a filter from the drawer closes it and narrows the register", asy
   const panel = page.getByRole("complementary", { name: "ตัวกรองเคส" });
   await expect(panel).toBeInViewport();
 
-  await panel.getByRole("checkbox").first().check();
+  // Click the visible label rather than whichever checkbox happens to be
+  // first. Data-backed facet groups can be empty, in which case the first
+  // checkbox is the visually hidden input behind the "has media" switch and
+  // a direct `.check()` correctly fails Playwright's hit-target check.
+  const mediaOnly = panel.getByRole("checkbox", { name: /เฉพาะที่มีหลักฐานแนบ/ });
+  await panel.getByText(/เฉพาะที่มีหลักฐานแนบ/).click();
+  await expect(mediaOnly).toBeChecked();
   await panel.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
 
   await expect(panel).not.toBeInViewport();

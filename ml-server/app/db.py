@@ -24,6 +24,11 @@ from .config import Settings
 # Source corpus (read-only -- this service never writes to it).
 EVENTS = "event_candidates"
 
+# The facility network, pushed by scripts/push-geodata.ts. Also read-only here.
+# Every document is one GeoJSON feature; the facilities live under one layer.
+GEO_FEATURES = "geo_features"
+FACILITY_LAYER = "south-facilities"
+
 # Everything the batch produces. The `flow_` prefix keeps the model's output
 # visibly separate from the ingestion collections in any Mongo shell.
 RUNS = "flow_model_runs"
@@ -32,7 +37,14 @@ CORRIDORS = "flow_corridors"
 FORECASTS = "flow_forecasts"
 SEGMENTS = "flow_segments"
 
-OUTPUT_COLLECTIONS = (RUNS, ANCHORS, CORRIDORS, FORECASTS, SEGMENTS)
+#: Per-case distance-pattern results, one document per case per run.
+#:
+#: It does not take the `flow_` prefix because it is not part of the
+#: route-prediction model and shares none of its run lifecycle -- see
+#: `distance_pattern.py` for why it keeps its own.
+CASE_PATTERNS = "result_batch_processing"
+
+OUTPUT_COLLECTIONS = (RUNS, ANCHORS, CORRIDORS, FORECASTS, SEGMENTS, CASE_PATTERNS)
 
 STATUS_BUILDING = "building"
 STATUS_LIVE = "live"
@@ -86,6 +98,20 @@ def ensure_indexes(db: Database) -> None:
 
     db[FORECASTS].create_index([("run_id", ASCENDING), ("anchor_id", ASCENDING)], unique=True)
     db[SEGMENTS].create_index([("run_id", ASCENDING), ("flow", DESCENDING)])
+
+    # One result per case per run, which is what makes a re-run idempotent
+    # rather than duplicating every case.
+    db[CASE_PATTERNS].create_index([("run_id", ASCENDING), ("event_id", ASCENDING)], unique=True)
+    # The join this collection exists for: given a case, its newest pattern.
+    # `computed_at` descending is part of the key so the lookup is a single
+    # index seek rather than a sort over every run's copy of that case.
+    db[CASE_PATTERNS].create_index([("event_id", ASCENDING), ("computed_at", DESCENDING)])
+    # Listing a run, and ranking within it -- the "which cases are most
+    # isolated" read. `coverage` ascending puts the starved cases first.
+    db[CASE_PATTERNS].create_index(
+        [("run_id", ASCENDING), ("summary.coverage", ASCENDING)]
+    )
+    db[CASE_PATTERNS].create_index([("run_id", ASCENDING), ("anchor_id", ASCENDING)])
 
 
 def live_run(db: Database) -> dict | None:

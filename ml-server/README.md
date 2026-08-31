@@ -105,6 +105,88 @@ first, and `?run_id=` pins any endpoint to a specific run for comparison.
 `--keep-runs` controls how many superseded runs are retained before their
 documents are pruned.
 
+## Running the distance-pattern batch
+
+A second, independent batch. For every case it records **what lies around it in
+each of 32 compass directions** — the nearest facility per direction, how far in
+a straight line, and how far along the road — and stores one document per case
+in `result_batch_processing`, joined to `event_candidates` by `event_id`.
+
+```bash
+python run_distance_pattern.py                    # every case, facilities, with road
+python run_distance_pattern.py --dry-run          # compute and report, write nothing
+python run_distance_pattern.py --radius-km 10     # a tighter neighbourhood
+python run_distance_pattern.py --no-road          # straight-line only, no graph needed
+python run_distance_pattern.py --limit-cases 200  # quick pass while developing
+```
+
+On the current corpus — 9,987 geocoded cases — a full run takes about 25
+seconds and stores 71 MB plus 4 MB of indexes, averaging ~7 KB per case. With
+`--keep-runs 2` the collection tops out near 150 MB.
+
+That it is seconds rather than minutes is the one design point worth knowing:
+**the work is done per distinct position, not per case.** Cases are geocoded to
+district centroids, so 9,987 of them stand on 228 coordinates. The expensive
+half — snapping to the road network and one Dijkstra sweep per anchor — runs 228
+times, and each result is written out for all 43.8 cases that share it, tagged
+with the `anchor_id` they have in common. Two cases at the same centroid have
+the same surroundings, and the output says so rather than pretending otherwise.
+
+### The foreign key
+
+`event_id` → `event_candidates._id`. In this app a "case" *is* an event
+candidate: `cases` is empty in every environment, and `case_corrections.event_id`
+already uses that convention. A `$lookup` on `event_id` resolves every geocoded
+case with no orphans in either direction.
+
+```js
+db.event_candidates.aggregate([
+  { $match: { _id: "evt_…" } },
+  { $lookup: { from: "result_batch_processing", localField: "_id",
+               foreignField: "event_id", as: "pattern" } },
+])
+```
+
+`anchor_id` uses the same construction as `corpus.anchor_id`, so a pattern and a
+`flow_anchors` document at the same centroid join on it too.
+
+### What one document holds
+
+`summary` carries the scalars worth ranking on — `coverage` (how many of the 32
+directions have anything within the radius), `nearest_m`, `anisotropy` (how
+lopsided the surroundings are), `median_detour_ratio`. `sectors` holds one
+subdocument per *filled* direction, with the compass name in Thai and English,
+the neighbour, and both distances; `empty` lists the directions that had
+nothing, so the two always account for all 32. Empty directions are not stored
+as null subdocuments — that keeps a typical document to about a third of the
+size while losing nothing.
+
+Every document also carries `params` and `caveats`, for the same reason the
+route API attaches `meta` to every response: a pattern read in isolation still
+has to say what radius produced it and what it cannot support.
+
+### Runs
+
+Versioned by `run_id` and never edited, like the route batch — but deliberately
+**not** registered in `flow_model_runs`. That collection's `live_run()` means
+"the newest live run" with no notion of which model wrote it, so a
+distance-pattern run in it could be served in answer to a routing query. Use
+`distance_pattern.latest_run_id(db)` instead. `--keep-runs` (default 2) bounds
+the collection, which otherwise grows by the whole corpus on every run.
+
+### What it deliberately does not claim
+
+The default neighbour set is the OSM facility layer, not other cases:
+case-to-case bearings are bearings between district centroids and carry no
+information. `--neighbours events` produces that degenerate view for comparison
+and labels itself in `params.neighbours`.
+
+An empty direction means nothing was found *within the radius*, not that nothing
+is there. Road distances come from a graph of motorway through tertiary only, so
+they over-state rural travel and should be used to rank rather than as driving
+distances. And `anchor.precision_m` is the number that governs the rest: at
+8,000 the case is a district centroid and the pattern describes the district.
+
 ## Running the API
 
 ```bash
@@ -233,20 +315,26 @@ needs no new data at all:
 
 ```
 ml-server/
-├── run_batch.py     # CLI: fit and store
-├── run_server.py    # CLI: serve
-├── test_smoke.py    # arithmetic checks, no DB required
+├── run_batch.py             # CLI: fit the route model and store
+├── run_distance_pattern.py  # CLI: per-case 32-direction pattern and store
+├── run_server.py            # CLI: serve
+├── test_smoke.py            # arithmetic checks, no DB required
 └── app/
-    ├── config.py    # settings + the frozen hyper-parameters recorded per run
-    ├── contract.py  # port of src/lib/types.ts + src/lib/flow/feasibility.ts
-    ├── db.py        # collections, indexes, the live-run pointer
-    ├── graph.py     # CSR road network, Dijkstra, RDP simplification
-    ├── corpus.py    # events -> anchors, distances, the data report
-    ├── corridors.py # candidate routes + Bayesian posterior (§6–7, §10)
-    ├── forecast.py  # Dirichlet-Multinomial, calibration, backtest (§8–9, §11)
-    ├── batch.py     # orchestration and the run lifecycle
-    └── api.py       # FastAPI read surface
+    ├── config.py            # settings + the frozen hyper-parameters recorded per run
+    ├── contract.py          # port of src/lib/types.ts + src/lib/flow/feasibility.ts
+    ├── db.py                # collections, indexes, the live-run pointer
+    ├── graph.py             # CSR road network, Dijkstra, RDP simplification
+    ├── corpus.py            # events -> anchors, distances, the data report
+    ├── corridors.py         # candidate routes + Bayesian posterior (§6–7, §10)
+    ├── forecast.py          # Dirichlet-Multinomial, calibration, backtest (§8–9, §11)
+    ├── batch.py             # route-model orchestration and the run lifecycle
+    ├── distance_pattern.py  # 32-rhumb compass, sector search, the result shape
+    ├── pattern_batch.py     # distance-pattern orchestration (per position, not per case)
+    └── api.py               # FastAPI read surface
 ```
+
+The two batches share `graph.py`, `contract.py`, `config.py`, and `db.py`, and
+nothing else. They are separate models with separate run lifecycles.
 
 ### Where this departs from the notebook
 

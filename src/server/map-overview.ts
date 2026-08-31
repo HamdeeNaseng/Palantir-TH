@@ -1,3 +1,4 @@
+import { msOrNull } from "@/lib/datetime";
 import { DEFAULT_FILTERS, type InvestigationFilters } from "@/lib/filters";
 import {
   districtAt,
@@ -169,7 +170,12 @@ export async function getMapOverview(
     }
   }
 
-  const timestamps = matched.map((e) => e.time.start.getTime());
+  // Unreadable timestamps are dropped rather than defaulted: this feeds the
+  // reported date span, and a fallback would widen it to a range no event
+  // actually occupies.
+  const timestamps = matched
+    .map((e) => msOrNull(e.time.start))
+    .filter((ms): ms is number => ms !== null);
 
   return {
     live: bundle.live,

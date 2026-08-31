@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Map, {
   AttributionControl,
   Layer,
@@ -13,6 +14,7 @@ import Map, {
 import type { DataDrivenPropertyValueSpecification, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+  IconBuildingCommunity,
   IconChevronDown,
   IconCurrentLocation,
   IconMap2,
@@ -52,6 +54,21 @@ import {
   setSatelliteBasemap,
   type BasemapFill,
 } from "@/lib/basemap";
+import type { FacilityMark } from "@/lib/facilities";
+import { FacilityBadgeSprite } from "@/lib/map-facility-icons";
+import {
+  FACILITY_OVERLAY_ANCHOR_ID,
+  FACILITY_OVERLAY_ANCHOR_LAYER,
+  FacilityHoverPopupBody,
+  FacilityLegend,
+  FacilityOverlay,
+  facilityHitLayers,
+  facilityHref,
+  facilityIndex,
+  findFacilityHit,
+  useFacilityBadges,
+} from "@/lib/map-facility-layer";
+import { useFacilities } from "@/lib/use-facilities";
 import type { EventFeatureCollection } from "@/server/shared-events";
 import type { AreaLevel, MapOverview } from "@/server/map-overview";
 
@@ -182,6 +199,12 @@ function baseStyle(): StyleSpecification {
         source: "provinces",
         paint: { "line-color": "#38bdf8", "line-width": 1.2, "line-opacity": 0.85 },
       },
+
+      // Draws nothing. The facility marks mount below it and every point, flow
+      // and prediction layer above it, whatever order they finish loading in —
+      // see `FACILITY_OVERLAY_ANCHOR_LAYER`. Above the choropleth, because a
+      // pin lost inside a dark fill is a pin nobody finds.
+      FACILITY_OVERLAY_ANCHOR_LAYER,
     ],
   };
 }
@@ -238,6 +261,7 @@ export default function MapWorkspace({
   /** The page's own filter query string, so the points match what is shown. */
   eventsQuery: string;
 }) {
+  const router = useRouter();
   const mapRef = useRef<MapRef | null>(null);
   const [zoom, setZoom] = useState(7);
   const [manualLevel, setManualLevel] = useState<AreaLevel | "auto">("auto");
@@ -252,9 +276,19 @@ export default function MapWorkspace({
    */
   const [showPrediction, setShowPrediction] = useState(false);
   const [showSegments, setShowSegments] = useState(false);
+  /**
+   * The response network, on by default and never filtered.
+   *
+   * The one layer on this page that does not answer to the query string: a
+   * hospital does not stop existing because the analyst narrowed to one month
+   * of one province, and the reason to look at it here is precisely to see
+   * what sits near the areas the choropleth just darkened.
+   */
+  const [showFacilities, setShowFacilities] = useState(true);
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<AreaPopup | null>(null);
+  const [facilityHover, setFacilityHover] = useState<FacilityMark | null>(null);
   const [events, setEvents] = useState<EventFeatureCollection | null>(null);
   const [eventsError, setEventsError] = useState(false);
   /**
@@ -267,6 +301,17 @@ export default function MapWorkspace({
   const [rankedOpen, setRankedOpen] = useState(false);
 
   const mapStyle = useMemo(() => baseStyle(), []);
+
+  const {
+    facilities,
+    loading: facilitiesLoading,
+    failed: facilitiesFailed,
+  } = useFacilities(showFacilities);
+  const { spriteRef: facilitySpriteRef, badgesReady: facilityBadgesReady } = useFacilityBadges(
+    mapRef,
+    ready,
+  );
+  const facilityById = useMemo(() => facilityIndex(facilities), [facilities]);
 
   /**
    * Points are fetched the first time a layer that needs them is switched on,
@@ -360,9 +405,10 @@ export default function MapWorkspace({
   const interactiveLayerIds = useMemo(() => {
     const ids: string[] = [];
     if (showPrediction && prediction) ids.push(PREDICTION_ANCHOR_HIT_LAYER.id);
+    if (showFacilities) ids.push(...facilityHitLayers(facilityBadgesReady));
     if (showAreas) ids.push("area-density");
     return ids;
-  }, [showAreas, showPrediction, prediction]);
+  }, [showAreas, showPrediction, prediction, showFacilities, facilityBadgesReady]);
 
   const applySatellite = useCallback((next: boolean) => {
     const map = mapRef.current?.getMap();
@@ -386,6 +432,15 @@ export default function MapWorkspace({
         }
       }
 
+      // Same rule one step down: a pin is a smaller, deliberately-aimed target
+      // than the area it stands in.
+      const facility = findFacilityHit(e.features, facilityById, facilityBadgesReady);
+      if (facility) {
+        setPopup(null);
+        router.push(facilityHref(facility.id));
+        return;
+      }
+
       const f = e.features?.find((feature) => feature.layer.id === "area-density");
       if (!f) {
         setPopup(null);
@@ -406,7 +461,17 @@ export default function MapWorkspace({
         n: counts[code] ?? 0,
       });
     },
-    [counts, level, meta.codeField, meta.nameField],
+    [
+      counts,
+      level,
+      meta.codeField,
+      meta.nameField,
+      facilityById,
+      facilityBadgesReady,
+      router,
+      selectAnchor,
+      selectedAnchorId,
+    ],
   );
 
   /**
@@ -441,6 +506,19 @@ export default function MapWorkspace({
     return width >= 1024 ? FIT_PADDING : FIT_PADDING_NARROW;
   }, []);
 
+  /**
+   * The only hover this page has. The choropleth answers on click because its
+   * targets are whole districts; a pin is small enough that hovering it is how
+   * anyone asks what it is.
+   */
+  const handleMouseMove = useCallback(
+    (e: MapLayerMouseEvent) => {
+      const facility = findFacilityHit(e.features, facilityById, facilityBadgesReady);
+      setFacilityHover((prev) => (prev?.id === facility?.id ? prev : facility));
+    },
+    [facilityById, facilityBadgesReady],
+  );
+
   const nudgeZoom = (d: number) =>
     mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 7) + d });
 
@@ -455,6 +533,9 @@ export default function MapWorkspace({
 
   return (
     <div className="relative min-h-0 flex-1">
+      {/* Off-screen source of the badge images — see `map-badges.tsx`. */}
+      <FacilityBadgeSprite ref={facilitySpriteRef} />
+
       <Map
         ref={mapRef}
         initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: 16 } }}
@@ -463,7 +544,7 @@ export default function MapWorkspace({
         attributionControl={false}
         dragRotate={false}
         interactiveLayerIds={interactiveLayerIds}
-        cursor={interactiveLayerIds.length > 0 ? "pointer" : undefined}
+        cursor={facilityHover || interactiveLayerIds.length > 0 ? "pointer" : undefined}
         onLoad={(e) => {
           setReady(true);
           e.target.fitBounds(BOUNDS, { padding: fitPadding(), duration: 0 });
@@ -475,6 +556,8 @@ export default function MapWorkspace({
         }}
         onZoomEnd={(e) => setZoom(e.viewState.zoom)}
         onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setFacilityHover(null)}
         onError={(e) => console.error("[maplibre]", e.error?.message ?? String(e))}
       >
         <AttributionControl compact position="bottom-right" />
@@ -493,6 +576,15 @@ export default function MapWorkspace({
           <Source id="province-fill" type="geojson" data={DATA.provinces}>
             <Layer {...areaLayer} beforeId="district-line" />
           </Source>
+        )}
+
+        {/* Above the choropleth, below the dots — see the anchor layer. */}
+        {showFacilities && (
+          <FacilityOverlay
+            facilities={facilities}
+            badgesReady={facilityBadgesReady}
+            beforeId={FACILITY_OVERLAY_ANCHOR_ID}
+          />
         )}
 
         {showDots && events && (
@@ -546,6 +638,19 @@ export default function MapWorkspace({
               <Layer {...PREDICTION_ANCHOR_HIT_LAYER} />
             </Source>
           </>
+        )}
+
+        {facilityHover && (
+          <Popup
+            longitude={facilityHover.lng}
+            latitude={facilityHover.lat}
+            closeButton={false}
+            closeOnClick={false}
+            className="palantir-popup"
+            offset={12}
+          >
+            <FacilityHoverPopupBody facility={facilityHover} action="คลิกเพื่อเปิดหน้าเครือข่าย" />
+          </Popup>
         )}
 
         {popup && (
@@ -632,6 +737,19 @@ export default function MapWorkspace({
                   ? "จุดเหตุการณ์ (โหลดไม่สำเร็จ)"
                   : "จุดเหตุการณ์"
             }
+          />
+          <Toggle
+            checked={showFacilities}
+            onChange={() => setShowFacilities((v) => !v)}
+            label={
+              facilitiesLoading
+                ? "หน่วยงาน/เครือข่าย (กำลังโหลด…)"
+                : facilitiesFailed
+                  ? "หน่วยงาน/เครือข่าย (โหลดไม่สำเร็จ)"
+                  : "หน่วยงาน/เครือข่าย"
+            }
+            icon={<IconBuildingCommunity size={12} stroke={1.7} />}
+            title="ด่านตรวจ ตำรวจ กู้ภัย ดับเพลิง ศูนย์อพยพ และโรงพยาบาล — แสดงทั้งหมดเสมอ ไม่ขึ้นกับตัวกรองเหตุการณ์"
           />
           <Toggle
             checked={showFlowCorridors && !flowUnavailable}
@@ -855,6 +973,10 @@ export default function MapWorkspace({
         </div>
 
         {/* Provenance + what is not on the map */}
+        {showFacilities && (
+          <FacilityLegend variant="floating" positionClass="right-[272px] bottom-8" />
+        )}
+
         <p className="absolute inset-x-2 bottom-1.5 flex flex-wrap items-center justify-center gap-x-2 text-center text-[9.5px] text-ink-muted lg:inset-x-auto lg:bottom-2 lg:left-1/2 lg:-translate-x-1/2 lg:flex-nowrap lg:whitespace-nowrap">
           <span>ขอบเขตการปกครอง: กรมป้องกันและบรรเทาสาธารณภัย (DDPM)</span>
           {data.totals.unplaced > 0 && (

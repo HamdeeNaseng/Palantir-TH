@@ -3,7 +3,8 @@ import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { PROVINCES } from "@/lib/geo";
 import { districtsOfProvince } from "@/lib/geography";
 import { SNAPSHOT_SCHEMA, type Snapshot } from "@/lib/snapshot";
-import { asGeoPrecision } from "@/lib/types";
+import { msOr } from "@/lib/datetime";
+import { asGeoPrecision, asSeverityLevel } from "@/lib/types";
 import { loadBundle, type RawBundle } from "./shared-events";
 
 /**
@@ -81,12 +82,15 @@ export function toSnapshot(bundle: RawBundle, builtAtMs: number): Omit<Snapshot,
     live: bundle.live,
     // Sorted once here rather than in every consumer: the client-side replay
     // binary-searches this array, and `buildEventsWorkspace` takes the span
-    // from its ends.
-    events: [...bundle.events]
-      .sort((a, b) => a.time.start.getTime() - b.time.start.getTime() || a._id.localeCompare(b._id))
-      .map((e) => ({
+    // from its ends. Timestamps are resolved once, before the sort, so a
+    // document is parsed the same way in both places and the comparator
+    // cannot disagree with the row it produced.
+    events: bundle.events
+      .map((e) => ({ e, ts: msOr(e.time.start, builtAtMs) }))
+      .sort((a, b) => a.ts - b.ts || a.e._id.localeCompare(b.e._id))
+      .map(({ e, ts }) => ({
         id: e._id,
-        ts: e.time.start.getTime(),
+        ts,
         type: e.event.type,
         title: e.event.title,
         provinceCode: e.location.provinceCode,
@@ -98,12 +102,16 @@ export function toSnapshot(bundle: RawBundle, builtAtMs: number): Omit<Snapshot,
         // Normalised here so every browser-side consumer of the snapshot
         // (map features, flow legs) gets a radius rather than `undefined`.
         precision: asGeoPrecision(e.location.geo_precision),
-        severity: e.severity,
+        // See `asSeverityLevel`: a word here is "not reported", not a level.
+        severity: asSeverityLevel(e.severity),
         confidence: e.confidence,
         verification: e.verification,
-        killed: e.casualties.killed,
-        injured: e.casualties.injured,
-        sources: e.corroborating_sources,
+        // Absent and null mean the same thing to every consumer — the source
+        // did not report it — so a missing `casualties` object projects to the
+        // nulls the schema already allows rather than throwing.
+        killed: e.casualties?.killed ?? null,
+        injured: e.casualties?.injured ?? null,
+        sources: e.corroborating_sources ?? [],
         // Only the counts are ever read (the network panel's totals, the map
         // popup's badges), so the arrays themselves stay on the server.
         mediaCount: e.media?.length ?? 0,
@@ -118,7 +126,7 @@ export function toSnapshot(bundle: RawBundle, builtAtMs: number): Omit<Snapshot,
     })),
     citizenReports: bundle.citizenReports.map((r) => ({
       id: r._id,
-      ts: r.reported_at.getTime(),
+      ts: msOr(r.reported_at, builtAtMs),
       channel: r.channel,
       provinceCode: r.provinceCode,
       district: r.district,
@@ -130,14 +138,14 @@ export function toSnapshot(bundle: RawBundle, builtAtMs: number): Omit<Snapshot,
       code: c.code,
       title: c.title,
       status: c.status,
-      occurredAtMs: c.occurred_at.getTime(),
+      occurredAtMs: msOr(c.occurred_at, builtAtMs),
       location: c.location,
       eventType: c.event_type,
       severity: c.severity,
       riskScore: c.risk_score,
       summary: c.summary,
       entities: c.entities,
-      updates: c.updates.map((u) => ({ atMs: u.at.getTime(), text: u.text, tag: u.tag })),
+      updates: c.updates.map((u) => ({ atMs: msOr(u.at, builtAtMs), text: u.text, tag: u.tag })),
     })),
     districtsByProvince: districtsByProvince(),
   };

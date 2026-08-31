@@ -29,7 +29,13 @@
     "test:e2e:ui": "playwright test --ui",
     "mongo:sync:pilot": "tsx scripts/sync-mongo.ts --allow-remote-target",
     "mongo:pull:prod": "tsx scripts/sync-mongo.ts --from .env.production --to .env.local",
-    "mongo:pull:prod:dry": "tsx scripts/sync-mongo.ts --from .env.production --to .env.local --dry-run"
+    "mongo:pull:prod:dry": "tsx scripts/sync-mongo.ts --from .env.production --to .env.local --dry-run",
+    "mongo:fix:dates": "tsx --env-file=.env.local scripts/fix-string-dates.mts",
+    "mongo:fix:dates:dry": "tsx --env-file=.env.local scripts/fix-string-dates.mts --dry-run",
+    "mongo:push:prod": "tsx scripts/sync-mongo.ts --from .env.local --to .env.production --allow-remote-target --collection event_candidates --collection result_batch_processing --collection flow_model_runs --collection flow_anchors --collection flow_corridors --collection flow_forecasts --collection flow_segments",
+    "mongo:push:prod:dry": "tsx scripts/sync-mongo.ts --from .env.local --to .env.production --dry-run --collection event_candidates --collection result_batch_processing --collection flow_model_runs --collection flow_anchors --collection flow_corridors --collection flow_forecasts --collection flow_segments",
+    "mongo:push:geodata": "tsx scripts/push-geodata.ts",
+    "mongo:push:geodata:dry": "tsx scripts/push-geodata.ts --dry-run"
   },
   "engines": {
     "node": "24.x",

@@ -24,6 +24,15 @@ from app.contract import (
     match_confidence,
     precision_radius_m,
 )
+from app.distance_pattern import (
+    COMPASS_ABBR,
+    COMPASS_TH,
+    N_SECTORS,
+    directional_neighbours,
+    initial_bearing_deg,
+    sector_of,
+    summarise,
+)
 from app.forecast import (
     cooccurrence_counts,
     next_district_posterior,
@@ -197,10 +206,100 @@ def test_cooccurrence_is_undirected() -> None:
     check("decay applied", abs(decayed[0, 1] - math.exp(-1.0)) < 1e-9)
 
 
+def test_compass() -> None:
+    """The rhumb table and the sector boundaries the whole pattern rests on."""
+    print("compass (32 rhumbs)")
+    check("32 abbreviations and 32 Thai names", len(COMPASS_ABBR) == len(COMPASS_TH) == N_SECTORS)
+    check("no duplicate abbreviation", len(set(COMPASS_ABBR)) == N_SECTORS)
+    check("cardinals land on their indices",
+          (COMPASS_ABBR[0], COMPASS_ABBR[8], COMPASS_ABBR[16], COMPASS_ABBR[24])
+          == ("N", "E", "S", "W"))
+
+    origin = np.array([101.0, 6.5])
+    for name, target, want in (
+        ("north", [101.0, 6.6], 0.0),
+        ("east", [101.1, 6.5], 90.0),
+        ("south", [101.0, 6.4], 180.0),
+        ("west", [100.9, 6.5], 270.0),
+    ):
+        got = float(initial_bearing_deg(origin, np.array(target)))
+        check(f"bearing {name}", abs(((got - want + 180) % 360) - 180) < 0.6, f"got {got:.2f}")
+
+    # The named direction sits at the CENTRE of its sector, so north straddles
+    # 360/0. Getting this off by half a width silently rotates every pattern.
+    check("north straddles zero", sector_of(0.0) == 0 and sector_of(359.0) == 0)
+    check("north's lower edge", sector_of(354.4) == 0 and sector_of(354.3) == N_SECTORS - 1)
+    check("north's upper edge", sector_of(5.6) == 0 and sector_of(5.7) == 1)
+    check("cardinals map to their sectors",
+          (sector_of(90.0), sector_of(180.0), sector_of(270.0)) == (8, 16, 24))
+
+
+def test_directional_neighbours() -> None:
+    """One neighbour per sector, and it must be the nearest one in that sector."""
+    print("directional neighbours")
+    anchor = np.array([[101.0, 6.5]])
+    # Two candidates due east, one due north, one far enough east to be excluded.
+    near_e = [101.05, 6.5]
+    far_e = [101.15, 6.5]
+    north = [101.0, 6.6]
+    beyond = [101.6, 6.5]  # ~66 km, outside a 25 km radius
+    nbrs = np.array([far_e, near_e, north, beyond])
+
+    dist, idx = directional_neighbours(anchor, nbrs, radius_m=25_000.0)
+    check("one row per anchor, 32 columns", dist.shape == (1, N_SECTORS))
+    check("east keeps only the nearer of two", idx[0, 8] == 1)
+    check("north found", idx[0, 0] == 2)
+    check("beyond the radius is excluded", 3 not in idx[0])
+    check("empty sectors marked", int((idx[0] >= 0).sum()) == 2)
+    check("empty distance is inf", np.isinf(dist[0, 16]))
+    check("never two per sector", bool(((idx >= 0).sum(axis=1) <= N_SECTORS).all()))
+
+    # An anchor inside its own neighbour set must not match itself.
+    both = np.vstack([anchor, nbrs])
+    _d, i_self = directional_neighbours(anchor, both, radius_m=25_000.0, drop_coincident=True)
+    check("coincident point dropped", 0 not in i_self[0])
+
+
+def test_summarise() -> None:
+    print("pattern summary")
+    row = np.full(N_SECTORS, np.inf)
+    row[[0, 8, 16]] = [1000.0, 2000.0, 3000.0]
+    s = summarise(row, None)
+    check("coverage counts filled sectors", s["coverage"] == 3)
+    check("empty sectors complement it", s["empty_sectors"] == N_SECTORS - 3)
+    check("nearest is the minimum", s["nearest_m"] == 1000.0)
+    check("mean over filled only", abs(s["mean_m"] - 2000.0) < 1e-9)
+
+    # An evenly ringed anchor is isotropic; a lopsided one is not.
+    even = np.full(N_SECTORS, 5000.0)
+    check("even ring -> zero anisotropy", abs(summarise(even, None)["anisotropy"]) < 1e-12)
+    check("lopsided -> positive anisotropy", summarise(row, None)["anisotropy"] > 0)
+
+    # Below three samples the coefficient of variation is noise, not a shape.
+    two = np.full(N_SECTORS, np.inf)
+    two[[0, 8]] = [1000.0, 2000.0]
+    check("two sectors -> anisotropy withheld", summarise(two, None)["anisotropy"] is None)
+
+    empty = np.full(N_SECTORS, np.inf)
+    check("no neighbours at all stays finite",
+          summarise(empty, None)["coverage"] == 0 and summarise(empty, None)["nearest_m"] is None)
+
+    # Road distance can never be shorter than the straight line it parallels.
+    road = np.full(N_SECTORS, np.inf)
+    road[[0, 8, 16]] = [1500.0, 2000.0, 9000.0]
+    sr = summarise(row, road)
+    check("detour median over reachable pairs", abs(sr["median_detour_ratio"] - 1.5) < 1e-9)
+    check("max detour", abs(sr["max_detour_ratio"] - 3.0) < 1e-9)
+    check("unreachable counted", sr["unreachable_sectors"] == 0)
+
+
 def main() -> int:
     for test in (
         test_contract,
         test_geometry,
+        test_compass,
+        test_directional_neighbours,
+        test_summarise,
         test_walk_forward_matches_direct_summation,
         test_walk_forward_excludes_the_current_day,
         test_road_prior_and_posterior,
