@@ -62,6 +62,7 @@ import {
   useFacilityBadges,
 } from "@/lib/map-facility-layer";
 import { useFacilities } from "@/lib/use-facilities";
+import { MapFullscreenButton, useMapFullscreen } from "@/lib/map-fullscreen";
 import { useDistancePattern } from "@/lib/use-distance-pattern";
 import { DistancePatternCard, DistancePatternLayers } from "@/lib/map-distance-pattern";
 import {
@@ -615,6 +616,10 @@ export default function MapPanel({
   const [view, setView] = useState<View>("ไฮบริด");
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [layersOpen, setLayersOpen] = useState(false);
+  const { fullscreen, toggle: toggleFullscreen, shellClass } = useMapFullscreen(mapRef);
+  // Full-screen puts its close button in the top-left corner, so the controls
+  // stacked there move out from under it for as long as it is there.
+  const leftStack = fullscreen ? "left-[92px] lg:left-[96px]" : "left-2 lg:left-3";
   // The legend is a permanent 152 px rail beside a desktop map and a third of
   // a phone screen on top of one, so below `lg` it starts as its header only.
   const [legendOpen, setLegendOpen] = useState(false);
@@ -982,7 +987,11 @@ export default function MapPanel({
   }).format(new Date(currentTimestamp));
 
   return (
-    <section className="panel relative h-[58vh] max-h-[520px] min-h-[320px] overflow-hidden lg:h-full lg:max-h-none lg:min-h-0">
+    <section
+      className={shellClass(
+        "panel relative h-[88vh] max-h-[1040px] min-h-[640px] overflow-hidden lg:h-full lg:max-h-none lg:min-h-0",
+      )}
+    >
       {/* Size this with width/height 100%, not `absolute inset-0`:
           maplibre-gl.css sets `.maplibregl-map { position: relative }` on the
           container react-map-gl creates, which overrides absolute positioning.
@@ -1261,7 +1270,9 @@ export default function MapPanel({
 
       <div className="pointer-events-none absolute inset-0">
         {/* View switcher */}
-        <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-1 rounded bg-[rgba(6,13,25,0.85)] p-0.5 lg:top-2.5 lg:left-3">
+        <div
+          className={`pointer-events-auto absolute top-2 flex items-center gap-1 rounded bg-[rgba(6,13,25,0.85)] p-0.5 lg:top-2.5 ${leftStack}`}
+        >
           {VIEWS.map((v) => (
             <button
               key={v}
@@ -1281,7 +1292,7 @@ export default function MapPanel({
         {/* Above the zoom cluster below it: the open list now reaches past
             `top-24`, and without this the later-in-DOM buttons paint over the
             bottom row and swallow the click that lands on it. */}
-        <div className="pointer-events-auto absolute top-11 left-2 z-10 lg:left-3">
+        <div className={`pointer-events-auto absolute top-11 z-10 ${leftStack}`}>
           <button
             type="button"
             onClick={() => setLayersOpen((v) => !v)}
@@ -1397,7 +1408,7 @@ export default function MapPanel({
         </div>
 
         {/* Zoom + recentre */}
-        <div className="pointer-events-auto absolute top-24 left-2 flex flex-col gap-1.5 lg:left-3">
+        <div className={`pointer-events-auto absolute top-24 flex flex-col gap-1.5 ${leftStack}`}>
           <div className="flex flex-col overflow-hidden rounded border border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)]">
             <button
               type="button"
@@ -1594,6 +1605,16 @@ export default function MapPanel({
           </div>
         )}
       </div>
+
+      <MapFullscreenButton
+        fullscreen={fullscreen}
+        onToggle={toggleFullscreen}
+        // Clear of the playhead, which spans the full width below `lg` and is
+        // only mounted when this panel owns the playback controls.
+        positionClass={
+          isControlled ? "right-2 bottom-6 lg:right-2.5 lg:bottom-9" : "right-2 bottom-[104px] lg:right-2.5 lg:bottom-9"
+        }
+      />
 
       {/* Never shown. The source React renders the type glyphs into so they can
           be rasterised for the map — see `map-event-icons.tsx`. */}

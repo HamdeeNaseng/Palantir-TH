@@ -40,6 +40,7 @@ import {
   type PinSource,
 } from "@/lib/report-form";
 import type { ProvinceCode } from "@/lib/types";
+import { MapFullscreenButton, useMapFullscreen } from "@/lib/map-fullscreen";
 
 /**
  * Where the citizen says it happened.
@@ -257,6 +258,7 @@ export default function ReportLocationPicker({
   onChange: (pin: PickedPin | null) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
+  const { fullscreen, toggle: toggleFullscreen, shellClass } = useMapFullscreen(mapRef);
   const [pin, setPin] = useState<PickedPin | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
@@ -497,7 +499,15 @@ export default function ReportLocationPicker({
   const busy = locating || !ready;
 
   return (
-    <div className="rounded border border-[rgba(37,66,102,0.8)] bg-[#0a1524]">
+    <div
+      // Full-screen keeps the toolbar and the read-out either side of the map
+      // — the pin is placed against them, not against the map alone — so the
+      // card becomes the column and the map box takes what is left.
+      className={shellClass(
+        "rounded border border-[rgba(37,66,102,0.8)] bg-[#0a1524]",
+        "flex flex-col",
+      )}
+    >
       <div className="flex flex-wrap items-center gap-2 border-b border-[rgba(37,66,102,0.6)] px-2.5 py-2">
         <button
           type="button"
@@ -545,7 +555,11 @@ export default function ReportLocationPicker({
           `absolute inset-0`: maplibre-gl.css forces `position: relative` on
           its container, which cancels the insets and collapses the box to zero
           height with no error anywhere. */}
-      <div className="h-[min(52vh,340px)] w-full sm:h-[280px]">
+      <div
+        className={`relative w-full ${
+          fullscreen ? "min-h-0 flex-1" : "h-[min(80vh,680px)] sm:h-[560px]"
+        }`}
+      >
         <Map
           ref={mapRef}
           initialViewState={{ bounds: BOUNDS, fitBoundsOptions: { padding: 12 } }}
@@ -603,6 +617,12 @@ export default function ReportLocationPicker({
             </Marker>
           )}
         </Map>
+
+        <MapFullscreenButton
+          fullscreen={fullscreen}
+          onToggle={toggleFullscreen}
+          positionClass="right-2.5 bottom-2.5"
+        />
       </div>
 
       <div className="border-t border-[rgba(37,66,102,0.6)] px-2.5 py-2">
