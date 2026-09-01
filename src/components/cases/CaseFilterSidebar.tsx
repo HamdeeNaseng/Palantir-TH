@@ -1,15 +1,10 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { IconChevronDown } from "@tabler/icons-react";
 import FilterShell from "@/components/layout/FilterShell";
 import { PROVINCE_BY_CODE } from "@/lib/geo";
-import {
-  DEFAULT_CASE_FILTERS,
-  casesHref,
-  type CaseFilters,
-} from "@/lib/case-filters";
+import { useLiveCaseFilters } from "@/lib/use-live-case-filters";
+import { DEFAULT_CASE_FILTERS, type CaseFilters } from "@/lib/case-filters";
 import type { CaseFacets } from "@/server/cases";
 import type { EventType, ProvinceCode, VerificationStatus } from "@/lib/types";
 
@@ -115,24 +110,13 @@ export default function CaseFilterSidebar({
   /** Hide the source picker where the page already pins one source. */
   hideSourceFilter?: boolean;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [f, setF] = useState<CaseFilters>(initial);
-
-  // Back/forward and the "ล้างตัวกรอง" chips in the header change the URL
-  // without remounting this component; without this the panel would keep
-  // showing the filters the user has navigated away from.
-  useEffect(() => setF(initial), [initial]);
-
-  const patch = (next: Partial<CaseFilters>) => setF((prev) => ({ ...prev, ...next }));
-
-  const apply = () =>
-    startTransition(() => router.push(casesHref(f, { page: 1 }, basePath), { scroll: false }));
-
-  const reset = () => {
-    setF({ ...DEFAULT_CASE_FILTERS, sort: f.sort, dir: f.dir });
-    startTransition(() => router.push(basePath, { scroll: false }));
-  };
+  // Each change is applied as it is made, the way `/investigate` and `/events`
+  // do — the register just has to pay for it with a debounced round trip
+  // instead of a pass over a cached dataset. See `useLiveCaseFilters`.
+  const { filters: f, patch, apply, reset, pending } = useLiveCaseFilters({
+    initial,
+    basePath,
+  });
 
   // Only offer districts inside the provinces currently ticked. "อื่น ๆ" has no
   // province name to match on, so its presence means show everything, and an
@@ -165,6 +149,7 @@ export default function CaseFilterSidebar({
       resetLabel="ล้างทั้งหมด"
       onReset={reset}
       onApply={apply}
+      live
       pending={pending}
       activeCount={activeCount}
       width="lg:w-[212px]"

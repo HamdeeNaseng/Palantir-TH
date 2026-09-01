@@ -88,9 +88,11 @@ export default function FilterShell({
   const closed = !desktop && !open;
 
   const apply = () => {
-    // In live mode the filters are already applied; this is only "close the
-    // drawer and look at them".
-    if (!live) onApply();
+    // In live mode this is "close the drawer and look at the results", not
+    // "apply" — but it is still handed on, because only the sidebar knows
+    // whether anything it applied is still waiting out a debounce. A live
+    // sidebar with nothing pending answers it with a no-op.
+    onApply();
     setOpen(false);
   };
 

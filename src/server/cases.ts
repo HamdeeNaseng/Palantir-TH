@@ -5,6 +5,7 @@ import { EVENT_TYPE_LABEL, SEVERITY_LABEL, VERIFICATION_LABEL } from "@/lib/labe
 import { PROVINCE_BY_CODE } from "@/lib/geo";
 import { loadDistricts, loadSubdistricts, representativePoint } from "@/lib/geography";
 import { EVENT_COLOR } from "@/lib/palette";
+import { toEventFeature, type EventFeatureCollection } from "./shared-events";
 import {
   BANGKOK_OFFSET,
   CASES_PER_PAGE,
@@ -223,11 +224,20 @@ function toRow(e: EventCandidateDoc, sourceName: (id: string) => string): CaseRo
     place: e.location.place,
     verification: e.verification,
     verificationLabel: VERIFICATION_LABEL[e.verification] ?? e.verification,
-    severity: e.severity,
-    severityLabel: e.severity === null ? "ไม่ระบุ" : SEVERITY_LABEL[e.severity],
-    confidence: e.confidence,
-    sourceId: e.source_id,
-    sourceName: sourceName(e.corroborating_sources[0] ?? e.source_id),
+    severity: e.severity ?? null,
+    // The schema says these are always present; the collection disagrees. 70
+    // of the 10,300 candidates carry no `corroborating_sources` and no
+    // `severity` (research-batch imports written before those fields), and 14
+    // carry no `source_id`. Reading `corroborating_sources[0]` off one of them
+    // threw a TypeError inside this map, which the catch below then reported
+    // as "MongoDB unavailable" — so one absent array took out the whole
+    // register: every row, every facet count, every filter, on both /cases and
+    // /report. A record missing a field is a row with less to say, not a dead
+    // page, so each one is read defensively and `== null` covers both shapes.
+    severityLabel: e.severity == null ? "ไม่ระบุ" : SEVERITY_LABEL[e.severity],
+    confidence: e.confidence ?? 0,
+    sourceId: e.source_id ?? "",
+    sourceName: sourceName(e.corroborating_sources?.[0] ?? e.source_id ?? ""),
     mediaCount: e.media?.length ?? 0,
     unreportedCount: e.unreported?.length ?? 0,
   };
@@ -337,19 +347,58 @@ export async function listCases(filters: CaseFilters): Promise<CaseListResult> {
       bucketsOf("location.place", "place"),
       events.countDocuments(buildMatch({ ...filters, hasMedia: true })),
       events
-        .aggregate<{ min: Date; max: Date }>([
+        .aggregate<{ min: Date | null; max: Date | null }>([
           { $match: { "attributes.superseded_by": { $exists: false } } },
-          { $group: { _id: null, min: { $min: "$time.start" }, max: { $max: "$time.start" } } },
+          {
+            $group: {
+              _id: null,
+              // Converted before comparing, not after. BSON orders every
+              // string below every date, so `$min` over the mixed field
+              // returns the smallest *string* — on the production data that
+              // is 2017 for a record starting in 2002, which is not a
+              // narrower answer but a wrong one. `onError: null` keeps a
+              // single unparseable value from failing the whole aggregation;
+              // `$min`/`$max` skip nulls.
+              min: {
+                $min: {
+                  $convert: { input: "$time.start", to: "date", onError: null, onNull: null },
+                },
+              },
+              max: {
+                $max: {
+                  $convert: { input: "$time.start", to: "date", onError: null, onNull: null },
+                },
+              },
+            },
+          },
         ])
         .toArray(),
     ]);
 
     const byId = new Map(registry.map((s) => [s._id, s]));
-    const sourceName = (id: string) => byId.get(id)?.shortName ?? id ?? "ไม่ระบุ";
+    // `||`, not `??`: an id that is missing arrives here as "" rather than
+    // null, and "" is a label nobody can read.
+    const sourceName = (id: string) => byId.get(id)?.shortName || id || "ไม่ระบุ";
 
     const pageCount = Math.max(1, Math.ceil(total / CASES_PER_PAGE));
-    const isoDay = (d: Date) =>
-      new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(d);
+    /**
+     * `Date | string`, because the collection holds both.
+     *
+     * 48 of the production candidates carry `time.start` as an ISO *string*
+     * rather than a Date (see `scripts/fix-string-dates.mts`, which exists to
+     * repair exactly this). `Intl.format` given a string reads it as a time
+     * value, gets NaN, and throws `RangeError: Invalid time value` — inside
+     * the try below, so the register answered a formatting fault with
+     * "MongoDB unavailable" and both /cases and /report went blank against a
+     * perfectly healthy cluster. An unparseable value now costs its own date,
+     * not the page.
+     */
+    const isoDay = (d: Date | string): string | null => {
+      const date = d instanceof Date ? d : new Date(d);
+      return Number.isNaN(date.getTime())
+        ? null
+        : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(date);
+    };
 
     /**
      * A page number past the end is not an empty result — it is a stale link,
@@ -460,13 +509,99 @@ export async function listCases(filters: CaseFilters): Promise<CaseListResult> {
         ),
         withMedia,
       },
-      span: spanRows[0]?.min
-        ? { from: isoDay(spanRows[0].min), to: isoDay(spanRows[0].max) }
-        : null,
+      span: (() => {
+        const from = spanRows[0]?.min ? isoDay(spanRows[0].min) : null;
+        const to = spanRows[0]?.max ? isoDay(spanRows[0].max) : null;
+        return from && to ? { from, to } : null;
+      })(),
     };
-  } catch {
-    // Database unavailable: preserve an honest empty state.
+  } catch (err) {
+    // Database unavailable: preserve an honest empty state, but never swallow
+    // the reason — same lesson `loadBundle()` already learned. A bare
+    // `catch {}` here is why "ยังไม่มีข้อมูลใน MongoDB" on production says
+    // nothing about whether the URI was wrong, the Vercel IP was not
+    // allowlisted, auth failed, or the collection is simply unseeded.
+    console.error("[listCases] MongoDB unavailable, serving empty state:", err);
     return empty;
+  }
+}
+
+// ------------------------------------------------------------- map points
+
+/**
+ * The same filtered set as `listCases`, as map marks.
+ *
+ * Separate from `listCases` rather than folded into it because the two answer
+ * different questions about the same rows: the table shows one page of 50, the
+ * map has to show every match or it is lying about the distribution. That also
+ * means this cannot be derived from `CaseListResult` — reading marks off the
+ * current page would redraw the map on every pagination click.
+ */
+export interface CasePointsResult {
+  /** False when MongoDB is unreachable — never substitute fixtures. */
+  live: boolean;
+  points: EventFeatureCollection;
+  /** Matches carrying a coordinate, i.e. `points.features.length`. */
+  plotted: number;
+  /**
+   * Matches with no coordinate at all. Stated rather than hidden: these are
+   * records that passed the filters and are counted nowhere on the map.
+   */
+  unplaced: number;
+  /** True when `MAX_CASE_POINTS` cut the set short. */
+  truncated: boolean;
+}
+
+/**
+ * Ceiling on marks sent to the browser. Well above any realistic citizen-report
+ * volume, and low enough that a filter cleared on the full register cannot ship
+ * ten thousand features into a page that also renders a table.
+ */
+const MAX_CASE_POINTS = 4000;
+
+const EMPTY_POINTS: CasePointsResult = {
+  live: false,
+  points: { type: "FeatureCollection", features: [] },
+  plotted: 0,
+  unplaced: 0,
+  truncated: false,
+};
+
+export async function listCasePoints(filters: CaseFilters): Promise<CasePointsResult> {
+  try {
+    const db = await getDb();
+    const events = db.collection<EventCandidateDoc>(COLLECTIONS.eventCandidates);
+
+    const match = buildMatch(filters);
+    // Nested inside the existing `$and` rather than merged: `buildMatch`
+    // already owns that key, and spreading would silently drop every filter.
+    const placed = { $and: [match, { "location.geo": { $ne: null } }] } as Filter<EventCandidateDoc>;
+
+    const [docs, total] = await Promise.all([
+      events.find(placed).limit(MAX_CASE_POINTS + 1).toArray(),
+      events.countDocuments(match),
+    ]);
+
+    const truncated = docs.length > MAX_CASE_POINTS;
+    // `toEventFeature` returns null for a document whose `geo` is missing
+    // despite the query — a malformed record, not a reason to drop the map.
+    const features = docs
+      .slice(0, MAX_CASE_POINTS)
+      .map(toEventFeature)
+      .filter((f) => f !== null);
+
+    return {
+      live: true,
+      points: { type: "FeatureCollection", features },
+      plotted: features.length,
+      // Not `total - features.length`: with the set truncated that difference
+      // is the ceiling talking, not the records without coordinates.
+      unplaced: truncated ? 0 : Math.max(0, total - features.length),
+      truncated,
+    };
+  } catch (err) {
+    console.error("[listCasePoints] MongoDB unavailable, serving empty state:", err);
+    return EMPTY_POINTS;
   }
 }
 
@@ -646,7 +781,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
     ]);
 
     const byId = new Map(registry.map((s) => [s._id, s]));
-    const sourceName = (sid: string) => byId.get(sid)?.shortName ?? sid ?? "ไม่ระบุ";
+    const sourceName = (sid: string) => byId.get(sid)?.shortName || sid || "ไม่ระบุ";
 
     const flat = rawDoc ? flattenRaw(rawDoc.raw) : { fields: [], body: null };
 
@@ -660,7 +795,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       event,
       effective,
       source: byId.get(event.source_id) ?? null,
-      corroborating: event.corroborating_sources
+      corroborating: (event.corroborating_sources ?? [])
         .map((sid) => byId.get(sid))
         .filter((s): s is SourceRegistryDoc => Boolean(s)),
       raw: rawDoc
@@ -690,9 +825,11 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
         )
         .slice(0, NEARBY_LIMIT),
     };
-  } catch {
+  } catch (err) {
     // Database unavailable — indistinguishable from "no such case" to the page,
-    // which renders a not-found rather than inventing a record.
+    // which renders a not-found rather than inventing a record. The log is the
+    // only thing that tells the two apart afterwards.
+    console.error("[getCase] MongoDB unavailable, reporting not-found:", err);
     return null;
   }
 }
