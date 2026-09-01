@@ -174,7 +174,7 @@ export default function CaseEditPanel({
       {/* ------------------------------------------------------- location */}
       {placeable ? (
         <div className="border-b border-[rgba(37,66,102,0.3)]">
-          <div className="h-[320px] w-full">
+          <div className="h-[640px] w-full">
             <CaseLocationMap
               lng={form.lng}
               lat={form.lat}

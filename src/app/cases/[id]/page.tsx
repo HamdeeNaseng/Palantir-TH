@@ -246,7 +246,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
             >
               {coordinates ? (
                 <>
-                  <div className="h-[300px] w-full">
+                  <div className="h-[600px] w-full">
                     <CaseLocationMap lng={lng} lat={lat} precisionM={precisionM} color={typeColor} />
                   </div>
                   <p className="border-t border-[rgba(37,66,102,0.45)] px-4 py-2 text-[10.5px] leading-relaxed text-ink-muted">
@@ -263,7 +263,7 @@ export default async function CaseDetailPage({ params, searchParams }: Props) {
                    full-size uncertainty circle, and captioned as an estimate,
                    so it cannot be mistaken for a reported position. */
                 <>
-                  <div className="h-[300px] w-full">
+                  <div className="h-[600px] w-full">
                     <CaseLocationMap
                       lng={estimate.centre[0]}
                       lat={estimate.centre[1]}

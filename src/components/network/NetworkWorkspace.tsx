@@ -276,8 +276,8 @@ export default function NetworkWorkspace({ data }: { data: NetworkData }) {
         )}
 
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_clamp(300px,25vw,360px)]">
-          <div className="grid min-h-0 grid-cols-1 gap-2 lg:grid-rows-[minmax(240px,1fr)_minmax(200px,1fr)]">
-            <section className="panel min-h-[280px] overflow-hidden lg:min-h-0">
+          <div className="grid min-h-0 grid-cols-1 gap-2 lg:grid-rows-[minmax(480px,2fr)_minmax(200px,1fr)]">
+            <section className="panel min-h-[560px] overflow-hidden lg:min-h-0">
               <FacilityMap facilities={rows} selectedId={selectedId} onSelect={setSelectedId} />
             </section>
 
