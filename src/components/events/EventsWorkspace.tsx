@@ -226,8 +226,8 @@ export default function EventsWorkspace({
           </p>
         )}
 
-        <div className="grid grid-cols-1 gap-2 lg:h-full lg:min-h-[884px] lg:grid-cols-[minmax(0,1fr)_clamp(300px,22vw,340px)] lg:grid-rows-[minmax(560px,1.75fr)_minmax(260px,1fr)]">
-          <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-rows-[82px_minmax(220px,1fr)_128px]">
+        <div className="grid grid-cols-1 gap-2 lg:h-full lg:min-h-[1162px] lg:grid-cols-[minmax(0,1fr)_clamp(300px,22vw,340px)] lg:grid-rows-[minmax(894px,3.5fr)_minmax(260px,1fr)]">
+          <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-rows-[82px_minmax(440px,1fr)_128px]">
             <EventsKpiRow data={data} playedCount={playedFeatures.length} density={density} />
 
             <MapPanel

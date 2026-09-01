@@ -1,6 +1,6 @@
 {
   "name": "palantir-th",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -19,6 +19,8 @@
     "check": "npm run check:env && npm run gis:validate && npm run typecheck && npm run build",
     "clean": "node scripts/clean.mjs",
     "db:seed": "tsx scripts/seed.ts",
+    "db:check": "tsx scripts/check-mongo.ts",
+    "db:check:local": "tsx scripts/check-mongo.ts --env .env",
     "ingest:fetch": "tsx scripts/seed.ts --fetch-only",
     "ingest:load": "tsx scripts/seed.ts --from-archive",
     "ingest:research": "tsx scripts/import-research-batch.ts",

@@ -22,6 +22,7 @@ import {
   setSatelliteBasemap,
   type BasemapFill,
 } from "@/lib/basemap";
+import { MapFullscreenButton, useMapFullscreen } from "@/lib/map-fullscreen";
 
 /**
  * Where one case was placed on the map.
@@ -265,6 +266,8 @@ export default function CaseLocationMap({
     [point?.[0], point?.[1], radiusM, color],
   );
 
+  const { fullscreen, toggle: toggleFullscreen, shellClass } = useMapFullscreen(mapRef);
+
   const applySatellite = useCallback((next: boolean) => {
     const map = mapRef.current?.getMap();
     if (map) setSatelliteBasemap(map, next, SATELLITE_FILLS);
@@ -272,7 +275,7 @@ export default function CaseLocationMap({
   }, []);
 
   return (
-    <div className="relative h-full w-full">
+    <div className={shellClass("relative h-full w-full")}>
       <Map
         ref={mapRef}
         initialViewState={{
@@ -348,7 +351,9 @@ export default function CaseLocationMap({
         onClick={() => applySatellite(!satellite)}
         aria-pressed={satellite}
         title="สลับภาพถ่ายดาวเทียม"
-        className={`absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded border px-2 py-1 text-[10.5px] ${
+        className={`absolute top-2.5 z-10 flex items-center gap-1.5 rounded border px-2 py-1 text-[10.5px] ${
+          fullscreen ? "left-[92px]" : "left-2.5"
+        } ${
           satellite
             ? "border-azure bg-[rgba(56,189,248,0.18)] text-azure"
             : "border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] text-ink-dim hover:text-ink"
@@ -357,6 +362,8 @@ export default function CaseLocationMap({
         <IconSatellite size={12} stroke={1.7} />
         ดาวเทียม
       </button>
+
+      <MapFullscreenButton fullscreen={fullscreen} onToggle={toggleFullscreen} />
     </div>
   );
 }

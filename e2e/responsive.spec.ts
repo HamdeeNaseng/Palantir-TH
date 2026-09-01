@@ -79,7 +79,9 @@ test("filters are reachable through the drawer on /cases", async ({ page }) => {
   await expect(panel).not.toBeInViewport();
 });
 
-test("applying a filter from the drawer closes it and narrows the register", async ({ page }) => {
+test("a filter ticked in the drawer applies itself, and the drawer closes on ดูผลลัพธ์", async ({
+  page,
+}) => {
   await page.goto("/cases");
 
   await page.getByRole("button", { name: /ตัวกรองเคส/ }).first().click();
@@ -93,9 +95,14 @@ test("applying a filter from the drawer closes it and narrows the register", asy
   const mediaOnly = panel.getByRole("checkbox", { name: /เฉพาะที่มีหลักฐานแนบ/ });
   await panel.getByText(/เฉพาะที่มีหลักฐานแนบ/).click();
   await expect(mediaOnly).toBeChecked();
-  await panel.getByRole("button", { name: "ใช้ตัวกรอง" }).click();
 
+  // No button press in between: the register applies each change as it is
+  // made, and the URL is where that becomes shareable. Given a moment for the
+  // debounce that keeps a run of ticks down to one query.
+  await expect(page).toHaveURL(/[?&](prov|type|ver|place|media)=/, { timeout: 15_000 });
+
+  // The footer button is "look at the results" now, not "apply them".
+  await expect(panel.getByRole("button", { name: "ใช้ตัวกรอง" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "ดูผลลัพธ์" }).click();
   await expect(panel).not.toBeInViewport();
-  // The choice went to the URL, which is what makes a filtered view shareable.
-  await expect(page).toHaveURL(/[?&](prov|type|ver|place|media)=/);
 });

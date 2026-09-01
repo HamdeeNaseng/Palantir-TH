@@ -224,7 +224,11 @@ export async function submitCitizenReport(
   let db: Awaited<ReturnType<typeof getDb>>;
   try {
     db = await getDb();
-  } catch {
+  } catch (err) {
+    // Never swallowed: this is the one branch a citizen sees as "the site is
+    // broken", and without the reason in the log there is nothing to tell a
+    // wrong URI, a rejected password and a missing IP allowlist entry apart.
+    console.error("[report-intake] MongoDB unavailable, submission refused:", err);
     return {
       status: "error",
       message: "เชื่อมต่อฐานข้อมูลไม่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง",

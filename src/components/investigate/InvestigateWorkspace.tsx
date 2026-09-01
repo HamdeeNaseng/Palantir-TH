@@ -110,22 +110,22 @@ export default function InvestigateWorkspace({
             `lg` that is exactly what we want instead: one column, each panel
             as tall as it needs to be. */}
         {/* The row floors add up, and have to be kept adding up: the left
-            column is 82 + 360 + 204 with two 8 px gaps = 662, which is the
-            first row's minimum, and 662 + 306 + one more gap = 976 is the
+            column is 82 + 720 + 204 with two 8 px gaps = 1022, which is the
+            first row's minimum, and 1022 + 306 + one more gap = 1336 is the
             grid's. Changing any one of them without the others lets a track
             collapse below the panel inside it. */}
-        <div className="grid grid-cols-1 gap-2 lg:h-full lg:min-h-[976px] lg:grid-cols-[minmax(0,1fr)_clamp(320px,22vw,360px)] lg:grid-rows-[minmax(662px,1.85fr)_minmax(306px,1fr)]">
+        <div className="grid grid-cols-1 gap-2 lg:h-full lg:min-h-[1336px] lg:grid-cols-[minmax(0,1fr)_clamp(320px,22vw,360px)] lg:grid-rows-[minmax(1022px,3.5fr)_minmax(306px,1fr)]">
           {/*
             The map takes the slack rather than a fixed slice of it.
 
             It used to be a flat `268px` track, which made it *shorter* on a
-            desktop than the `58vh` it gets on a phone, and left it that size
+            desktop than the `88vh` it gets on a phone, and left it that size
             on a 27-inch monitor with the extra height going to the chart row
             underneath. A floor plus the larger `fr` share means it starts at
-            360 and grows with the viewport — on this console the map is the
+            720 and grows with the viewport — on this console the map is the
             panel being read, and the three charts below it are reference.
           */}
-          <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-rows-[82px_minmax(360px,1.55fr)_minmax(204px,1fr)]">
+          <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-rows-[82px_minmax(720px,3.1fr)_minmax(204px,1fr)]">
             <KpiRow kpis={data.kpis} />
             <MapPanel events={data.events} onSelectFeature={setSelectedId} />
 

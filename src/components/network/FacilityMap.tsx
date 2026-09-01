@@ -34,6 +34,7 @@ import {
   useFacilityBadges,
 } from "@/lib/map-facility-layer";
 import { FacilityBadgeSprite } from "@/lib/map-facility-icons";
+import { MapFullscreenButton, useMapFullscreen } from "@/lib/map-fullscreen";
 
 /**
  * Where the response network is.
@@ -111,6 +112,7 @@ export default function FacilityMap({
   const [hover, setHover] = useState<Facility | null>(null);
 
   const { spriteRef, badgesReady } = useFacilityBadges(mapRef, ready);
+  const { fullscreen, toggle: toggleFullscreen, shellClass } = useMapFullscreen(mapRef);
 
   const mapStyle = useMemo(() => style(), []);
   const byId = useMemo(() => new Map(facilities.map((f) => [f.id, f])), [facilities]);
@@ -154,7 +156,7 @@ export default function FacilityMap({
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div className={shellClass("relative h-full w-full")}>
       {/* Off-screen source of the badge images — see `map-badges.tsx`. */}
       <FacilityBadgeSprite ref={spriteRef} />
 
@@ -211,7 +213,9 @@ export default function FacilityMap({
         onClick={() => setSatellite((v) => !v)}
         aria-pressed={satellite}
         title="สลับภาพถ่ายดาวเทียม"
-        className={`absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded border px-2 py-1 text-[10.5px] ${
+        className={`absolute top-2.5 z-10 flex items-center gap-1.5 rounded border px-2 py-1 text-[10.5px] ${
+          fullscreen ? "left-[92px]" : "left-2.5"
+        } ${
           satellite
             ? "border-azure bg-[rgba(56,189,248,0.18)] text-azure"
             : "border-[rgba(56,100,150,0.5)] bg-[rgba(6,13,25,0.85)] text-ink-dim hover:text-ink"
@@ -220,6 +224,8 @@ export default function FacilityMap({
         <IconSatellite size={12} stroke={1.7} />
         ดาวเทียม
       </button>
+
+      <MapFullscreenButton fullscreen={fullscreen} onToggle={toggleFullscreen} />
     </div>
   );
 }

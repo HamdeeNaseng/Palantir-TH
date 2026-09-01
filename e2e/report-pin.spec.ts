@@ -175,7 +175,13 @@ test.describe("ภาพถ่ายดาวเทียม", () => {
     });
 
     await openIntakeForm(page);
-    const toggle = page.getByRole("button", { name: /^ดาวเทียม$/ });
+    // `/report` carries two maps now — the intake picker and the overview
+    // panel above the register — so "ดาวเทียม" alone is ambiguous. Only the
+    // overview's toggle carries a title, which is what tells them apart
+    // without reaching for a generated element id.
+    const toggle = page
+      .getByRole("button", { name: /^ดาวเทียม$/ })
+      .and(page.locator("button:not([title])"));
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => tileRequests.length, { timeout: 15_000 }).toBeGreaterThan(0);
     await toggle.click();

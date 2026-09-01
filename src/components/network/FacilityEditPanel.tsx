@@ -133,7 +133,7 @@ export default function FacilityEditPanel({ facility }: { facility: Facility }) 
       </p>
 
       <div className="mb-3 overflow-hidden rounded-lg border border-[rgba(37,66,102,0.7)]">
-        <div className="h-[300px] w-full">
+        <div className="h-[600px] w-full">
           <CaseLocationMap
             // Keyed on the mode so MapLibre rebuilds the marker layer rather
             // than being asked to swap a GeoJSON dot for a draggable Marker

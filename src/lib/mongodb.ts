@@ -1,7 +1,30 @@
+import dns from "node:dns";
 import { MongoClient, type Db } from "mongodb";
 
-const uri = process.env.MONGODB_URI ?? "mongodb://root:changeme@localhost:27017/palantir_th?authSource=admin";
+const LOCAL_URI = "mongodb://root:changeme@localhost:27017/palantir_th?authSource=admin";
+
+const uri = process.env.MONGODB_URI ?? LOCAL_URI;
 const dbName = process.env.MONGODB_DB ?? "palantir_th";
+
+/**
+ * The default above is a convenience for a fresh clone, and a trap in
+ * production: an unset `MONGODB_URI` on the host then reads as a perfectly
+ * ordinary connection failure to `localhost:27017`, and the pages render the
+ * same "ยังไม่มีข้อมูลใน MongoDB" screen they would show for a wrong password
+ * or an un-allowlisted IP. Note that `.env.production` is gitignored and never
+ * reaches a platform build — the variable has to be set in the host's own
+ * environment (e.g. the Vercel project settings), per environment.
+ *
+ * Said once at module load rather than per request, so it appears at the top
+ * of a cold function's log where it is actually findable.
+ */
+if (process.env.NODE_ENV === "production" && process.env.MONGODB_URI === undefined) {
+  console.error(
+    "[mongodb] MONGODB_URI is not set in this environment; falling back to localhost, " +
+      "which cannot resolve from a deployed server. Set MONGODB_URI (and MONGODB_DB) " +
+      "in the deployment platform's environment variables.",
+  );
+}
 
 /**
  * Tuned for the deployment target: Vercel serverless functions talking to
@@ -44,8 +67,62 @@ declare global {
   var _palantirMongo: Promise<MongoClient> | undefined;
 }
 
-function connect(): Promise<MongoClient> {
-  return new MongoClient(uri, clientOptions).connect();
+/**
+ * True when this process has no resolver it can actually reach.
+ *
+ * Node reads its resolver list from the OS and, on Windows, sometimes comes up
+ * with `127.0.0.1` where nothing is listening — while Windows itself resolves
+ * the same name perfectly well. Every `mongodb+srv://` connect then dies in
+ * milliseconds with `querySrv ECONNREFUSED`, which reads exactly like a dead
+ * cluster and sends the reader to check Atlas, the password and the IP
+ * allowlist for a fault that is none of them.
+ */
+function loopbackResolversOnly(): boolean {
+  const servers = dns.getServers();
+  return (
+    servers.length > 0 &&
+    servers.every((s) => {
+      // Node reports a resolver as `1.2.3.4`, `1.2.3.4:5353`, or `[::1]:5353`.
+      // A bare IPv6 address carries several colons, so it is never a host:port.
+      const host = s.startsWith("[")
+        ? s.slice(1, s.indexOf("]"))
+        : s.split(":").length > 2
+          ? s
+          : s.replace(/:\d+$/, "");
+      return host === "::1" || host.startsWith("127.");
+    })
+  );
+}
+
+const isSrvDnsFailure = (err: unknown): boolean => {
+  const code = (err as { code?: string })?.code;
+  const message = String((err as { message?: string })?.message ?? "");
+  return (
+    /querySrv|queryTxt/.test(message) &&
+    (code === "ECONNREFUSED" || code === "ESERVFAIL" || code === "ETIMEOUT")
+  );
+};
+
+/**
+ * Public resolvers are used as a *fallback*, never as the default: overriding
+ * a resolver that works would bypass split-horizon DNS, a VPN, or a private
+ * Atlas endpoint. So the ordinary path is untouched, and this only runs after
+ * a connect has already failed on SRV lookup with no reachable resolver — the
+ * one case where the alternative is not "slower", it is "never connects".
+ */
+async function connect(): Promise<MongoClient> {
+  try {
+    return await new MongoClient(uri, clientOptions).connect();
+  } catch (err) {
+    if (!isSrvDnsFailure(err) || !loopbackResolversOnly()) throw err;
+    console.warn(
+      "[mongodb] SRV lookup failed and this process has no reachable DNS resolver " +
+        `(${dns.getServers().join(", ")}); retrying once via 1.1.1.1 / 8.8.8.8. ` +
+        "This is a local Node/Windows resolver fault, not an Atlas one.",
+    );
+    dns.setServers(["1.1.1.1", "8.8.8.8"]);
+    return new MongoClient(uri, clientOptions).connect();
+  }
 }
 
 /**

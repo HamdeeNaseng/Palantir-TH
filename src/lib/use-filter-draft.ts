@@ -77,7 +77,14 @@ export function useFilterDraft({
     if (live) onApply(merged);
   };
 
-  const apply = () => onApply(filters);
+  /**
+   * The footer button. In live mode every edit has already been sent, and
+   * re-sending the same set would only cost a duplicate history entry — so
+   * there the button is purely "close the drawer".
+   */
+  const apply = () => {
+    if (!live) onApply(filters);
+  };
 
   const reset = () => {
     setFilters(DEFAULT_FILTERS);

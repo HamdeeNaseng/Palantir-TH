@@ -2,15 +2,39 @@
 
 แพลตฟอร์มวิเคราะห์เหตุการณ์ความมั่นคงชายแดนใต้ — Next.js 15 (App Router, TypeScript) + MongoDB
 
-หน้าที่สร้างแล้ว
-
-- **สืบสวน** (`/investigate`) ตาม `mockup/page สืบสวน.png` — ภาพรวมของพื้นที่
-- **ทะเบียนเคส** (`/cases`, `/cases/[id]`) — ตารางเหตุการณ์ทั้งหมด ค้นหา/กรอง แล้วกดเข้าไปดูรายเคส
-- **รายงานจากประชาชน** (`/report`) — ตารางเดียวกันกรองเฉพาะรายงานที่ประชาชนส่งเข้ามา
-  พร้อมฟอร์มแจ้งเหตุที่บันทึกลง `raw_records` -> `event_candidates` ตาม protocol ใน `mockup/MVP.md`
-- **เหตุการณ์** (`/events`) ตาม `mockup/page เหตุการณ์.png` — ไทม์ไลน์เล่นย้อนหลังของเหตุการณ์ที่ตรงกับตัวกรอง
+| คอนโซล | เส้นทาง | ทำอะไร |
+| --- | --- | --- |
+| สืบสวน | `/investigate` | ภาพรวมของพื้นที่ |
+| ทะเบียนเคส | `/cases`, `/cases/[id]` | ตารางเหตุการณ์ทั้งหมด ค้นหา/กรอง แล้วกดดูรายเคส |
+| รายงานจากประชาชน | `/report` | ตารางเดิมกรองเฉพาะ `src_citizen` + ฟอร์มแจ้งเหตุ |
+| เหตุการณ์ | `/events` | ไทม์ไลน์เล่นย้อนหลังของเหตุการณ์ที่ตรงกับตัวกรอง |
+| เครือข่าย | `/network`, `/network/[id]` | ด่าน ค่าย สถานีตำรวจ กู้ภัย โรงพยาบาล ฯลฯ + สถานะเปิด-ปิด |
+| แผนที่ | `/map` | ความหนาแน่นรายจังหวัด/อำเภอ/ตำบล + ชั้นวิเคราะห์เชิงพื้นที่ |
+| แหล่งข้อมูล | `/sources` | ทะเบียนแหล่งข้อมูล สัดส่วน ชั้นความน่าเชื่อถือ รอบดึงข้อมูล |
 
 ![หน้าสืบสวน](mockup/page%20%E0%B8%AA%E0%B8%B7%E0%B8%9A%E0%B8%AA%E0%B8%A7%E0%B8%99.png)
+
+## ฟีเจอร์ที่รองรับ
+
+✅ พร้อมใช้ · 🟡 บางส่วน · ⛔ ยังไม่ทำ
+
+| กลุ่ม | ฟีเจอร์ | สถานะ |
+| --- | --- | --- |
+| คอนโซล | ทุกหน้าในตารางด้านบน | ✅ |
+| คอนโซล | สมมติฐาน (`/hypotheses`) — แท็บเดียวที่ยังเป็น stub | ⛔ |
+| ตัวกรอง | กรองสดจาก snapshot ในเบราว์เซอร์ + sync URL — `/investigate` `/events` `/cases` `/report` | ✅ |
+| ตัวกรอง | ค้นหา/แบ่งหน้า/นับ facet ใน MongoDB สำหรับทะเบียนเคส | ✅ |
+| แผนที่ | choropleth สามระดับ · ภาพถ่ายดาวเทียม (opt-in) · เต็มจอทุกแผนที่ | ✅ |
+| แผนที่ | ชั้นวิเคราะห์ — รูปแบบระยะทาง · ชั้นสถานที่สำคัญ · พยากรณ์การไหลบนโครงข่ายถนน | ✅ |
+| ประชาชน | ฟอร์มแจ้งเหตุ + GPS/ปักหมุดเอง + วงความแม่นยำ | ✅ |
+| ประชาชน | กัน abuse ด้วย reCAPTCHA v3 | ✅ |
+| ข้อมูล | ทะเบียนแหล่งข้อมูล + รอบดึงข้อมูล + ชั้นความน่าเชื่อถือ | 🟡 อ่านอย่างเดียว |
+| ข้อมูล | ขอบเขต DDPM + จุดหมู่บ้าน OSM | ✅ |
+| ข้อมูล | Connector จริง (DSW / ACLED / UCDP) | ⛔ มีแต่ fixtures |
+| ข้อมูล | `canonical_events` + event resolution, verification engine | ⛔ |
+| ปฏิบัติการ | `npm run db:check` ตรวจการเชื่อมต่อ MongoDB ของ deployment | ✅ |
+| ปฏิบัติการ | ใช้งานบนมือถือ (mobile-first ทุกคอนโซล) | ✅ |
+| ปฏิบัติการ | ทำงานต่อได้เมื่อ MongoDB ล่ม (fixtures ในหน่วยความจำ) | ✅ |
 
 ## เริ่มใช้งาน
 
@@ -33,21 +57,15 @@ npm run dev            # http://localhost:3000
 | `npm run build` | production build (เขียนลง `.next-build/`) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:seed` | seed ข้อมูลตัวอย่าง — ต่อท้าย `-- --force` เพื่อ reseed |
+| `npm run db:check` | ต่อ MongoDB ของ `.env.production` ผ่าน `src/lib/mongodb.ts` — ผ่านแปลว่า *แอป* ต่อได้ ไม่ใช่แค่ driver ต่อได้ |
+| `npm run db:check:local` | เช่นเดียวกัน แต่อ่าน `.env` — หรือ `-- --env <ไฟล์>` เพื่อระบุเอง |
 | `npm run test:e2e` | Playwright — GPS จำลอง + mobile viewport (เปิด dev server ให้เอง บน `.next-e2e/`) |
 | `npm run gis:fetch` | ดึงขอบเขต DDPM (จังหวัด/อำเภอ/ตำบล) — `-- --only=<layer>` เพื่อดึงเฉพาะชั้นเดียว |
 | `npm run gis:villages` | ดึงจุดหมู่บ้านจาก OpenStreetMap (ODbL) — ไม่ใช่ข้อมูลทางการ ครอบคลุมไม่ครบ |
 
 dev กับ build แยก `distDir` กันเพื่อไม่ให้แย่ง file handle บน `.next/trace`
-เวลารัน build ขณะที่ dev server ยังทำงานอยู่ (ดู `next.config.ts`)
-ถ้าต้องเปิด dev server ตัวที่สองพร้อมกัน ให้กำหนด `distDir` ของมันแยกออกไปด้วย
-ไม่งั้นตัวที่สองจะตายด้วย `EPERM` ตอนเปิด `.next/trace`
-
-```bash
-NEXT_DIST_DIR=.next-alt npx next dev -p 3100
-```
-
-Next.js จะเติม `.next-alt/types/**/*.ts` เข้าไปใน `tsconfig.json` ให้เอง — เป็นการแก้ไฟล์จริง
-ปิด dev server ตัวนั้นแล้วอย่าลืม revert `tsconfig.json` กลับ
+เวลารัน build ขณะที่ dev server ยังทำงานอยู่ (ดู `next.config.ts`) — dev server ตัวที่สอง
+ก็ต้องกำหนด `distDir` แยกเช่นกัน (`NEXT_DIST_DIR=.next-alt npx next dev -p 3100`)
 
 ## โครงสร้าง
 
@@ -61,9 +79,16 @@ src/
 │   ├── report/page.tsx          รายงานจากประชาชน — ตารางเดิม กรองเฉพาะ src_citizen + ฟอร์มแจ้งเหตุ
 │   ├── events/page.tsx          เหตุการณ์ — ไทม์ไลน์เล่นย้อนหลัง (server component, อ่าน searchParams)
 │   ├── map/page.tsx             แผนที่ภาพรวม — ความหนาแน่นรายจังหวัด/อำเภอ/ตำบล ตามระดับซูม
+│   │                            + ชั้นวิเคราะห์ (รูปแบบระยะทาง / สถานที่สำคัญ / พยากรณ์การไหล)
+│   ├── network/page.tsx         เครือข่ายตอบสนอง — ด่าน ค่าย สถานี กู้ภัย โรงพยาบาล ฯลฯ
+│   ├── network/[id]/page.tsx    รายละเอียดสถานที่ + แก้ไขที่ตั้ง
+│   ├── sources/page.tsx         ทะเบียนแหล่งข้อมูล — สัดส่วน ชั้นความน่าเชื่อถือ รอบดึงข้อมูล
 │   ├── api/map/events/route.ts  จุดเหตุการณ์สำหรับ /map (ดึงเมื่อเปิดชั้นจุดเท่านั้น ~6 MB)
+│   ├── api/distance-pattern/    รูปแบบระยะทางระหว่างเหตุการณ์
+│   ├── api/facilities/          ชั้นสถานที่สำคัญบน /map
+│   ├── api/flow/…               พยากรณ์การไหลบนโครงข่ายถนน (legs / prediction / anchor)
 │   ├── api/snapshot/route.ts    ชุดข้อมูลทั้งก้อนสำหรับ cache ในเบราว์เซอร์ (gzip 372 KB / br 251 KB, ETag + 304)
-│   ├── (stub)/…                 แท็บอื่นในแถบนำทาง ยังไม่ได้สร้าง
+│   ├── (stub)/hypotheses/       แท็บสมมติฐาน — แท็บเดียวที่ยังไม่ได้สร้าง
 │   └── globals.css              design tokens (Tailwind v4 @theme)
 ├── components/
 │   ├── layout/TopNav.tsx
@@ -74,8 +99,11 @@ src/
 │   │                            CasePagination, CaseLocationMap, MediaThumb —
 │   │                            ใช้ร่วมกับ /cases และ /report ผ่าน prop `basePath`
 │   ├── report/                  ReportIntakeSection (ยุบ/ขยาย), ReportForm,
-│   │                            ReportLocationPicker (GPS + ปักหมุด + ดาวเทียม)
-│   ├── map/                     MapWorkspace — choropleth สามระดับ + อันดับพื้นที่
+│   │                            ReportLocationPicker (GPS + ปักหมุด + ดาวเทียม),
+│   │                            ReportMapPanel — แผงแผนที่ของหน้าแจ้งเหตุ
+│   ├── map/                     MapWorkspace — choropleth สามระดับ + อันดับพื้นที่ + ชั้นวิเคราะห์
+│   ├── network/                 NetworkWorkspace, FacilityMap, FacilityEditPanel
+│   ├── sources/                 SourceKpiRow, SourceRegisterTable, IngestionRunsPanel, TrustMixPanel
 │   ├── events/                  EventsWorkspace (state owner), EventsFilterSidebar, EventsKpiRow,
 │   │                            TimelinePanel, EventsTrendPanel, RecentPlayedPanel,
 │   │                            PhenomenaSummaryPanel, InspectSummaryPanel
@@ -93,6 +121,9 @@ src/
 │   ├── snapshot-cache.ts        อ่าน/เขียน snapshot ใน IndexedDB (ไม่ใช่ localStorage — payload ~5.1 MB)
 │   ├── use-snapshot.ts          โหลดจาก cache ก่อน แล้วรีเฟรชจาก MongoDB ทุก 5 นาที
 │   ├── use-local-filters.ts     กรองจาก snapshot ในเครื่อง + sync URL ผ่าน History API
+│   ├── use-live-case-filters.ts กรองทะเบียนเคส/รายงานทันทีที่ติ๊ก (debounce + history เดียว)
+│   ├── map-fullscreen.tsx       useMapFullscreen + ปุ่มเต็มจอ ใช้ร่วมกันทุกแผนที่
+│   ├── source-labels.ts         ป้ายชื่อ/สีของชั้นความน่าเชื่อถือ connector และสถานะรอบดึงข้อมูล
 │   ├── view-models/             builder ของ /investigate และ /events ใช้ร่วมกันทั้งสองฝั่ง
 │   ├── datetime.ts              จัดรูปแบบวันที่ ตรึง timezone ไว้ที่ Asia/Bangkok
 │   ├── geo.ts                   จังหวัด/อำเภอ + projection ของแผนที่
@@ -106,8 +137,11 @@ src/
 │   ├── events.ts                first paint ของหน้าเหตุการณ์ (เรียก view-model ตัวเดียวกับ client)
 │   ├── cases.ts                 query/paginate/facet ของทะเบียนเคส (ทำใน MongoDB)
 │   ├── reports.ts               listCases ล็อกไว้ที่ source src_citizen สำหรับ /report
+│   ├── sources.ts               rollup ของ source_registry + ingestion_runs สำหรับ /sources
 │   └── report-intake.ts         Server Action รับฟอร์ม — ตาม protocol ใน mockup/MVP.md
-└── scripts/seed.ts              seed ข้อมูลลง MongoDB
+└── scripts/
+    ├── seed.ts                  seed ข้อมูลลง MongoDB
+    └── check-mongo.ts           ตรวจว่า MongoDB ของ deployment ตอบจริงไหม (npm run db:check)
 ```
 
 แผนที่และกราฟทุกตัวเขียนเป็น SVG เอง ไม่มี charting library และไม่ต้องใช้ tile server
@@ -298,32 +332,19 @@ round-trip ไป MongoDB ทุก tick
   `onTimestampChange`, `onHoverFeature` ฯลฯ) — `/investigate` ที่ไม่ส่ง prop เหล่านี้ยังทำงาน
   เหมือนเดิมทุกประการ (ยืนยันด้วยการเทียบ output ก่อน/หลัง)
 
-## ข้อจำกัดที่พบในเครื่องนี้
+## ข้อควรรู้เวลาแก้โค้ดบนเครื่องนี้
 
-`npm run build` **ใช้ไม่ได้บนไดรฟ์ D:** เพราะ D: เป็น **exFAT** ซึ่งไม่รองรับ symlink
-Windows จึงคืน `EISDIR` จาก `readlink()` แทน `EINVAL` ที่ตัว resolver ของ Next.js คาดไว้
-
-```
-Error: EISDIR: illegal operation on a directory, readlink 'D:\...\src\app\page.tsx'
-```
-
-ตรวจสอบได้ว่าเป็นปัญหาระดับ filesystem ไม่ใช่โค้ด:
-
-```bash
-node -e "try{require('fs').readlinkSync('package.json')}catch(e){console.log(e.code)}"
-# บน D: (exFAT) -> EISDIR     บน C: (NTFS) -> EINVAL  <- ค่าที่ถูกต้อง
-```
-
-`npm run dev` และ `npm run typecheck` ยังทำงานได้ปกติ
-ถ้าต้อง build จริงให้ย้าย repo ไปไว้บนไดรฟ์ NTFS (C:)
+บนไดรฟ์ exFAT (เช่น D:) Windows คืน `EISDIR` จาก `readlink()` แทน `EINVAL` ที่ resolver
+ของ Next.js คาดไว้ ทำให้ `next build` ล้ม — `npm run build` จึง preload
+`scripts/windows-readlink-compat.cjs` ไว้แก้เฉพาะจุดนั้น ถ้าเรียก `next build` ตรง ๆ
+โดยไม่ผ่าน npm script จะเจออาการเดิม
 
 > ไฟล์ในโปรเจกต์นี้ต้องเป็น **UTF-8** — ถ้าแก้ไฟล์ที่มีภาษาไทยด้วย PowerShell
 > ให้ใส่ `-Encoding utf8` เสมอ ไม่งั้นจะกลายเป็น UTF-16 แล้วอ่านไม่ออก
 
 ## ที่ยังไม่ได้ทำ
 
-- แท็บที่เหลือในแถบนำทาง (เครือข่าย / แผนที่ / แหล่งข้อมูล / สมมติฐาน) ยังเป็น stub
+ดูช่อง ⛔ และ 🟡 ใน [ฟีเจอร์ที่รองรับ](#ฟีเจอร์ที่รองรับ) ข้างบน อีกข้อที่ไม่ได้อยู่ในตารางนั้น:
+
 - คอลเลกชัน `cases` ยังว่าง — ทะเบียนเคสจึงอ่านจาก `event_candidates` โดยถือหนึ่งเหตุการณ์
   เป็นหนึ่งเคส ส่วน `buildCases()` ใน `fixtures.ts` เป็นข้อมูลสมมติที่ `seed.ts` ไม่ได้เขียนลง DB
-- Connector จริง (DSW / ACLED / UCDP) — ตอนนี้มีแต่ fixtures
-- `canonical_events` + event resolution (Phase 4) และ verification engine (Phase 5)

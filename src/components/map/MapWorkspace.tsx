@@ -69,6 +69,7 @@ import {
   useFacilityBadges,
 } from "@/lib/map-facility-layer";
 import { useFacilities } from "@/lib/use-facilities";
+import { MapFullscreenButton, useMapFullscreen } from "@/lib/map-fullscreen";
 import type { EventFeatureCollection } from "@/server/shared-events";
 import type { AreaLevel, MapOverview } from "@/server/map-overview";
 
@@ -263,6 +264,7 @@ export default function MapWorkspace({
 }) {
   const router = useRouter();
   const mapRef = useRef<MapRef | null>(null);
+  const { fullscreen, toggle: toggleFullscreen, shellClass } = useMapFullscreen(mapRef);
   const [zoom, setZoom] = useState(7);
   const [manualLevel, setManualLevel] = useState<AreaLevel | "auto">("auto");
   const [showAreas, setShowAreas] = useState(true);
@@ -532,7 +534,7 @@ export default function MapWorkspace({
   }, [max]);
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className={shellClass("relative min-h-0 flex-1")}>
       {/* Off-screen source of the badge images — see `map-badges.tsx`. */}
       <FacilityBadgeSprite ref={facilitySpriteRef} />
 
@@ -679,7 +681,12 @@ export default function MapWorkspace({
         {/* Above the reading rail: on a phone the open controls card and the
             bottom sheet occupy the same band, and without this the sheet — later
             in the DOM — paints over the layer list the reader just opened. */}
-        <div className="pointer-events-auto absolute top-2.5 left-2 z-10 flex w-[178px] flex-col gap-1.5 lg:left-3">
+        <div
+          className={`pointer-events-auto absolute top-2.5 z-10 flex w-[178px] flex-col gap-1.5 ${
+            // Out from under the full-screen close button while it is there.
+            fullscreen ? "left-[92px] lg:left-[96px]" : "left-2 lg:left-3"
+          }`}
+        >
           <button
             type="button"
             onClick={() => setControlsOpen((v) => !v)}
@@ -976,6 +983,16 @@ export default function MapWorkspace({
         {showFacilities && (
           <FacilityLegend variant="floating" positionClass="right-[272px] bottom-8" />
         )}
+
+        <MapFullscreenButton
+          fullscreen={fullscreen}
+          onToggle={toggleFullscreen}
+          // Bottom-right belongs to the reading rail on a wide screen and to
+          // the ranked sheet on a phone, so the button takes the free strip
+          // beside the rail, and stacks under the zoom cluster on mobile.
+          positionClass="pointer-events-auto top-[132px] right-2 lg:top-auto lg:right-[272px] lg:bottom-2"
+          exitPositionClass="pointer-events-auto top-2.5 left-2 lg:left-3"
+        />
 
         <p className="absolute inset-x-2 bottom-1.5 flex flex-wrap items-center justify-center gap-x-2 text-center text-[9.5px] text-ink-muted lg:inset-x-auto lg:bottom-2 lg:left-1/2 lg:-translate-x-1/2 lg:flex-nowrap lg:whitespace-nowrap">
           <span>ขอบเขตการปกครอง: กรมป้องกันและบรรเทาสาธารณภัย (DDPM)</span>
