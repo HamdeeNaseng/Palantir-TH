@@ -8,10 +8,11 @@ import ActiveCaseFilters from "@/components/cases/ActiveCaseFilters";
 import CaseTable from "@/components/cases/CaseTable";
 import CasePagination from "@/components/cases/CasePagination";
 import ReportIntakeSection from "@/components/report/ReportIntakeSection";
-import { parseCaseFilters, serializeCaseFilters } from "@/lib/case-filters";
+import ReportMapPanel from "@/components/report/ReportMapPanel";
+import { hasActiveCaseFilters, parseCaseFilters, serializeCaseFilters } from "@/lib/case-filters";
 import { districtsOfProvince } from "@/lib/geography";
 import { PROVINCES } from "@/lib/geo";
-import { listCitizenReports } from "@/server/reports";
+import { listCitizenReports, listCitizenReportPoints } from "@/server/reports";
 import type { DistrictOption } from "@/lib/report-form";
 import type { ProvinceCode } from "@/lib/types";
 
@@ -30,7 +31,13 @@ export default async function ReportPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const filters = parseCaseFilters(await searchParams);
-  const data = await listCitizenReports(filters);
+  // One round trip, two readings of the same filter set: the table pages
+  // through 50 rows, the map has to carry every match or it misreports the
+  // distribution. Run together so the map is not a second waterfall.
+  const [data, mapPoints] = await Promise.all([
+    listCitizenReports(filters),
+    listCitizenReportPoints(filters),
+  ]);
 
   const districtsByProvince = Object.fromEntries(
     PROVINCES.map((p) => [
@@ -63,6 +70,16 @@ export default async function ReportPage({
 
         <main className="flex min-w-0 flex-1 flex-col gap-2 bg-abyss p-2 lg:overflow-hidden">
           <ReportIntakeSection districtsByProvince={districtsByProvince} />
+
+          <ReportMapPanel
+            points={mapPoints.points}
+            plotted={mapPoints.plotted}
+            unplaced={mapPoints.unplaced}
+            truncated={mapPoints.truncated}
+            live={mapPoints.live}
+            filtered={hasActiveCaseFilters(filters)}
+            backRef={backRef}
+          />
 
           <section className="panel shrink-0 overflow-visible">
             <div className="flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:gap-3">
