@@ -30,6 +30,8 @@ vercel.env
 /test-results/
 /playwright-report/
 /.next-e2e/
+# Generated from the installed MapLibre version by predev/prebuild.
+/public/maplibre/
 scripts/test-atlas.ts
 scripts/sync-mongo.ts
 scripts/import-verified-events-*.ts

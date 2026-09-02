@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { IconMaximize, IconX } from "@tabler/icons-react";
+import { setWorkerUrl } from "maplibre-gl";
 import type { MapRef } from "react-map-gl/maplibre";
+
+/**
+ * MapLibre v6 is ESM-only and Next cannot emit its worker's shared sibling
+ * automatically. Every map component imports this shared module, so configure
+ * the worker here before React can construct a map. `predev`/`prebuild` copy
+ * both matching files into `public/maplibre`.
+ */
+setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
 /**
  * Full-screen for a map panel.
