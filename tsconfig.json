@@ -36,7 +36,12 @@
     ".next/types/**/*.ts",
     "next-env.d.ts",
     ".next-verify/types/**/*.ts",
-    ".next-build/dev/types/**/*.ts"
+    ".next-build/dev/types/**/*.ts",
+    ".next-mapfix/types/**/*.ts",
+    ".next-mapfix/dev/types/**/*.ts",
+    ".next-webpack-test/types/**/*.ts",
+    ".next-webpack-test/dev/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
