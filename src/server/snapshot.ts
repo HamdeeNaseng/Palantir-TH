@@ -3,6 +3,7 @@ import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { PROVINCES } from "@/lib/geo";
 import { districtsOfProvince } from "@/lib/geography";
 import { SNAPSHOT_SCHEMA, type Snapshot } from "@/lib/snapshot";
+import { encodeSnapshot } from "@/lib/snapshot-wire";
 import { msOr } from "@/lib/datetime";
 import { asGeoPrecision, asSeverityLevel } from "@/lib/types";
 import { loadBundle, type RawBundle } from "./shared-events";
@@ -196,7 +197,10 @@ async function build(previous: CachedSnapshot | null): Promise<CachedSnapshot> {
   if (previous && previous.etag === etag) return { ...previous, checkedAtMs };
 
   const snapshot: Snapshot = { ...body, version: etag };
-  const json = JSON.stringify(snapshot);
+  // Serialised in the transport encoding, never the in-memory shape: see
+  // `@/lib/snapshot-wire`. `snapshot` itself is returned unchanged below,
+  // because the server render consumes the object and pays no parse at all.
+  const json = JSON.stringify(encodeSnapshot(snapshot));
   const raw = Buffer.from(json, "utf8");
 
   // A `Buffer` is a `Uint8Array` at runtime, but `BodyInit` wants one backed by

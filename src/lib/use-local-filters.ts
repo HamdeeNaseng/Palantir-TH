@@ -63,6 +63,7 @@ export function useLocalFilters<TView>({
   initialView,
   initialVersion,
   initialBuiltAtMs,
+  initialViewPartial = false,
   build,
 }: {
   /** Where a fallback navigation goes, e.g. `/events`. */
@@ -74,6 +75,15 @@ export function useLocalFilters<TView>({
   initialVersion: string;
   /** When that snapshot was read from MongoDB, for deciding which copy is newer. */
   initialBuiltAtMs: number;
+  /**
+   * True when the server sent a view it knows to be incomplete — `/events`
+   * omits its 9,749 map features to keep them off a low-spec phone's RSC
+   * payload. The usual "keep the server's output until something changes" rule
+   * assumes the two are interchangeable; when they are not, the local rebuild
+   * has to happen as soon as a snapshot is in hand rather than waiting for a
+   * filter change that may never come.
+   */
+  initialViewPartial?: boolean;
   build: (snapshot: Snapshot, filters: InvestigationFilters) => TView;
 }): LocalFilters<TView> {
   const router = useRouter();
@@ -116,7 +126,8 @@ export function useLocalFilters<TView>({
    */
   const useLocal =
     held !== null &&
-    (filtersChanged ||
+    (initialViewPartial ||
+      filtersChanged ||
       (held.version !== initialVersion && held.builtAtMs > initialBuiltAtMs));
 
   const view = useMemo(

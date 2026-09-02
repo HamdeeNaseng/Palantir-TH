@@ -37,6 +37,7 @@ import {
   EVENT_BADGE_LAYER,
   EventBadgeSprite,
 } from "@/lib/map-event-icons";
+import { useLowSpecDevice } from "@/lib/use-low-spec-device";
 import type { LinkableFamily } from "@/lib/events-replay";
 import type { FlowLeg } from "@/lib/flow/types";
 import {
@@ -614,6 +615,8 @@ export default function MapPanel({
   const router = useRouter();
   const mapRef = useRef<MapRef | null>(null);
   const [view, setView] = useState<View>("ไฮบริด");
+  /** Drops the two full-viewport washes on weak hardware; see the layers below. */
+  const lowSpec = useLowSpecDevice();
   const [satellite, setSatellite] = useState(SATELLITE_DEFAULT_ON);
   const [layersOpen, setLayersOpen] = useState(false);
   const { fullscreen, toggle: toggleFullscreen, shellClass } = useMapFullscreen(mapRef);
@@ -1051,16 +1054,31 @@ export default function MapPanel({
         {/* Its own source, holding one feature per position — see
             `uncertaintyData`. Same `beforeId` as the heatmap, so both washes
             still sit under every outline and mark. */}
-        <Source id="events-positions" type="geojson" data={uncertaintyData}>
+        <Source id="events-positions" type="geojson" data={uncertaintyData} buffer={64}>
           <Layer
             {...UNCERTAINTY_LAYER}
             beforeId="district-outline"
             filter={uncertaintyFilter}
-            layout={{ visibility: view === "ไฮบริด" ? "visible" : "none" }}
+            layout={{
+              // Dropped entirely on a weak device — see `useLowSpecDevice`.
+              // Hundreds of overlapping translucent circles is the most
+              // expensive thing on this map per pixel it contributes.
+              visibility: view === "ไฮบริด" && !lowSpec ? "visible" : "none",
+            }}
           />
         </Source>
 
-        <Source id="events" type="geojson" data={events}>
+        {/*
+          `buffer` and `maxzoom` are sized for points rather than left at the
+          polygon-shaped defaults. 128 units of overlap per tile exists so a
+          wide line or a fill is not clipped at the seam; a circle a few pixels
+          across needs a fraction of that, and the difference is features
+          indexed into two tiles instead of one, 9,749 times over. `maxzoom`
+          caps how deep the tile pyramid is built — beyond it MapLibre
+          overzooms the deepest tiles, which for points is visually identical
+          and several levels of indexing cheaper.
+        */}
+        <Source id="events" type="geojson" data={events} buffer={64} maxzoom={12}>
           {/*
             The two red washes, pinned as low as they can go and still be read.
 
@@ -1088,7 +1106,14 @@ export default function MapPanel({
             {...HEAT_LAYER}
             beforeId="district-outline"
             filter={timeFilter}
-            layout={{ visibility: view !== "แผนที่" ? "visible" : "none" }}
+            layout={{
+              // The ความหนาแน่น view *is* the heatmap, so it survives there
+              // even on a weak device — hiding it would leave that view empty.
+              // In ไฮบริด it is decoration over the dots, and that is the copy
+              // a low-spec phone does without.
+              visibility:
+                view === "ความหนาแน่น" || (view !== "แผนที่" && !lowSpec) ? "visible" : "none",
+            }}
           />
           <Layer
             {...POINT_LAYER}
