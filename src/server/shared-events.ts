@@ -1,4 +1,5 @@
 import { COLLECTIONS, getDb } from "@/lib/mongodb";
+import { readCachedBundle } from "./bundle-cache";
 import { EVENT_COLOR } from "@/lib/palette";
 import { RANGE_DAYS, type InvestigationFilters } from "@/lib/filters";
 import { TRUSTED_SCORE_FLOOR } from "@/lib/snapshot";
@@ -131,25 +132,37 @@ const EVENT_PROJECTION = {
   targets: 1,
 } as const;
 
+/** The empty bundle — what every failure path serves instead of fixtures. */
+const emptyBundle = (): RawBundle => ({
+  sources: [],
+  events: [],
+  citizenReports: [],
+  ingestionRuns: [],
+  cases: [],
+  live: false,
+});
+
 /**
  * Reads the document layers from MongoDB. An unavailable or unseeded database
  * returns an empty bundle; production must never silently substitute mock data.
+ *
+ * Served from `snapshot_cache` when a build is present, because the direct
+ * scan below cannot complete against this cluster: even projected it is
+ * 6.24 MB, the measured throughput is ~94 KB/s, and `socketTimeoutMS` is 45 s.
+ * The scan is kept as the fallback for a fresh clone or a local docker
+ * database, where it is both fast and the only thing there is to read.
  */
 export async function loadBundle(): Promise<RawBundle> {
   try {
-    const db = await getDb();
-    const [sources, events, citizenReports, ingestionRuns, cases] = await Promise.all([
-      db.collection<SourceRegistryDoc>(COLLECTIONS.sourceRegistry).find({}).toArray(),
-      db
-        .collection<EventCandidateDoc>(COLLECTIONS.eventCandidates)
-        .find({}, { projection: EVENT_PROJECTION })
-        .toArray(),
-      db.collection<CitizenReportDoc>(COLLECTIONS.citizenReports).find({}).toArray(),
-      db.collection<IngestionRunDoc>(COLLECTIONS.ingestionRuns).find({}).toArray(),
-      db.collection<CaseDoc>(COLLECTIONS.cases).find({}).toArray(),
-    ]);
+    const cached = await readCachedBundle();
+    if (cached) return cached.bundle;
 
-    return { sources, events, citizenReports, ingestionRuns, cases, live: sources.length > 0 };
+    console.warn(
+      "[loadBundle] no precomputed bundle in snapshot_cache; falling back to a " +
+        "direct scan. Against a throttled cluster this will exceed socketTimeoutMS " +
+        "— run `npm run snapshot:build` to populate it.",
+    );
+    return await scanBundle();
   } catch (err) {
     // Database unavailable: preserve an honest empty state, but never swallow
     // the reason. A bare `catch {}` here is why a production outage showed up
@@ -158,14 +171,30 @@ export async function loadBundle(): Promise<RawBundle> {
     console.error("[loadBundle] MongoDB unavailable, serving empty state:", err);
   }
 
-  return {
-    sources: [],
-    events: [],
-    citizenReports: [],
-    ingestionRuns: [],
-    cases: [],
-    live: false,
-  };
+  return emptyBundle();
+}
+
+/**
+ * The direct read of all five collections.
+ *
+ * Exported because `scripts/build-snapshot-cache.ts` is the one caller that
+ * *should* pay for it: run from a machine with no request deadline and a
+ * socket timeout raised to match, it is the input the cache is built from.
+ */
+export async function scanBundle(): Promise<RawBundle> {
+  const db = await getDb();
+  const [sources, events, citizenReports, ingestionRuns, cases] = await Promise.all([
+    db.collection<SourceRegistryDoc>(COLLECTIONS.sourceRegistry).find({}).toArray(),
+    db
+      .collection<EventCandidateDoc>(COLLECTIONS.eventCandidates)
+      .find({}, { projection: EVENT_PROJECTION })
+      .toArray(),
+    db.collection<CitizenReportDoc>(COLLECTIONS.citizenReports).find({}).toArray(),
+    db.collection<IngestionRunDoc>(COLLECTIONS.ingestionRuns).find({}).toArray(),
+    db.collection<CaseDoc>(COLLECTIONS.cases).find({}).toArray(),
+  ]);
+
+  return { sources, events, citizenReports, ingestionRuns, cases, live: sources.length > 0 };
 }
 
 /**

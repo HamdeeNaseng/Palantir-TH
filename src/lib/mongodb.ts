@@ -59,7 +59,13 @@ const clientOptions = {
    * mistaken for a dead connection, but still bounded so a half-open socket
    * cannot pin a function for its whole execution limit.
    */
-  socketTimeoutMS: 45_000,
+  /**
+   * Overridable because one caller legitimately needs a different budget:
+   * `scripts/build-snapshot-cache.ts` performs the whole-corpus scan that this
+   * timeout exists to prevent a *request* from attempting. A job with no
+   * deadline raises it; nothing serving a request ever should.
+   */
+  socketTimeoutMS: Number(process.env.MONGODB_SOCKET_TIMEOUT_MS) || 45_000,
 };
 
 /**
@@ -212,6 +218,20 @@ export async function getDb(): Promise<Db> {
 }
 
 export const COLLECTIONS = {
+  /**
+   * One document holding the whole read-side bundle, brotli-compressed.
+   *
+   * The cluster is an Atlas M0, whose network throughput measures ~94 KB/s
+   * regardless of collection, cursor batch size or how warm the connection is.
+   * At that rate the projected `event_candidates` scan is 6.24 MB — 68 s — and
+   * `socketTimeoutMS` (45 s) cuts it off long before it lands, which is the
+   * "ยังเชื่อมต่อ MongoDB ไม่ได้" banner in production. Compressed, the same
+   * bundle is ~323 KB and reads back in about 3 s.
+   *
+   * Written only by `npm run snapshot:build`; every request reads it.
+   */
+  snapshotCache: "snapshot_cache",
+
   sourceRegistry: "source_registry",
   ingestionRuns: "ingestion_runs",
   rawRecords: "raw_records",

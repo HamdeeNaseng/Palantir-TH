@@ -19,6 +19,8 @@
     "check": "npm run check:env && npm run gis:validate && npm run typecheck && npm run build",
     "clean": "node scripts/clean.mjs",
     "db:seed": "tsx scripts/seed.ts",
+    "snapshot:build": "tsx scripts/build-snapshot-cache.mts",
+    "snapshot:build:local": "tsx scripts/build-snapshot-cache.mts --env .env.local",
     "db:check": "tsx scripts/check-mongo.ts",
     "db:check:local": "tsx scripts/check-mongo.ts --env .env",
     "ingest:fetch": "tsx scripts/seed.ts --fetch-only",
