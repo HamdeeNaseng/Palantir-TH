@@ -20,8 +20,17 @@ export async function getEventsWorkspace(
   filters: InvestigationFilters = DEFAULT_FILTERS,
 ): Promise<{ data: EventsWorkspace; snapshotVersion: Snapshot["version"]; snapshotBuiltAtMs: number }> {
   const snapshot = await getSnapshot();
+  const data = buildEventsWorkspace(snapshot, filters, Date.now());
+
   return {
-    data: buildEventsWorkspace(snapshot, filters, Date.now()),
+    // The features are dropped on the way out, not skipped during the build:
+    // every aggregate below them — facets, histogram, span, totalMatched — is
+    // computed from the full match and survives, so the first paint is still
+    // the real answer for these filters. Only the map's dots are deferred, and
+    // `EventsWorkspace` rebuilds them from the snapshot it fetches anyway.
+    // Measured: 6.68 MB of RSC payload for a set the client immediately
+    // recreates, which on a throttled phone is seconds of parsing.
+    data: { ...data, events: { ...data.events, features: [] }, eventsDeferred: true },
     snapshotVersion: snapshot.version,
     snapshotBuiltAtMs: snapshot.builtAtMs,
   };

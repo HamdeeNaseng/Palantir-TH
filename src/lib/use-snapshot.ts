@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readCachedSnapshot, writeCachedSnapshot } from "./snapshot-cache";
 import { SNAPSHOT_SCHEMA, type Snapshot } from "./snapshot";
+import { decodeSnapshot, isWireSnapshot } from "./snapshot-wire";
 
 /**
  * Keeps one copy of the dataset in the browser and re-reads MongoDB on a
@@ -55,7 +56,13 @@ async function fetchSnapshot(
   if (response.status === 304) return null;
   if (!response.ok) throw new Error(`/api/snapshot responded ${response.status}`);
 
-  const snapshot = (await response.json()) as Snapshot;
+  // The route sends the dictionary-encoded form (see `@/lib/snapshot-wire`).
+  // A plain `Snapshot` is still accepted so a client that outlives a rollback
+  // reads the older payload rather than throwing.
+  const payload = (await response.json()) as unknown;
+  const snapshot = isWireSnapshot(payload)
+    ? decodeSnapshot(payload)
+    : (payload as Snapshot);
   if (snapshot.schema !== SNAPSHOT_SCHEMA) {
     throw new Error(`snapshot schema ${snapshot.schema}, this build expects ${SNAPSHOT_SCHEMA}`);
   }

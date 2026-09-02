@@ -90,6 +90,9 @@ export default function EventsWorkspace({
     initialView: initial,
     initialVersion: snapshotVersion,
     initialBuiltAtMs: snapshotBuiltAtMs,
+    // The server left the map features out of the first paint; rebuild as soon
+    // as the snapshot lands rather than waiting for a filter change.
+    initialViewPartial: initial.eventsDeferred === true,
     build: (snap, filters) => buildEventsWorkspace(snap, filters, Date.now()),
   });
 
@@ -242,7 +245,17 @@ export default function EventsWorkspace({
 
         <div className="grid grid-cols-1 gap-2 lg:h-full lg:min-h-[1162px] lg:grid-cols-[minmax(0,1fr)_clamp(300px,22vw,340px)] lg:grid-rows-[minmax(894px,3.5fr)_minmax(260px,1fr)]">
           <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-rows-[82px_minmax(440px,1fr)_128px]">
-            <EventsKpiRow data={data} playedCount={playedFeatures.length} density={density} />
+            {/* While the server has deferred the features there is nothing to
+                count, and a literal 0 would read as "nothing has happened yet"
+                rather than "not loaded". The playhead starts at the end of the
+                span, so every matched event is played by definition — that is
+                the honest stand-in until the snapshot lands and the real
+                per-feature count takes over. */}
+            <EventsKpiRow
+              data={data}
+              playedCount={data.eventsDeferred ? data.totalMatched : playedFeatures.length}
+              density={density}
+            />
 
             <MapPanel
               events={data.events}

@@ -35,6 +35,22 @@ export interface EventsWorkspace {
   filters: InvestigationFilters;
   /** Sorted ascending by `properties.ts` — required for client-side binary search. */
   events: EventFeatureCollection;
+  /**
+   * True when `events.features` was deliberately emptied before this view left
+   * the server, and the browser must rebuild it from the snapshot.
+   *
+   * The features are by far the largest thing on the page — 9,749 of them,
+   * 6.68 MB of RSC payload — and the client downloads the same corpus again in
+   * the snapshot and rebuilds them from it anyway. Shipping both cost a
+   * low-spec phone seconds of parsing for a set it was about to throw away.
+   * Every aggregate beside this one is small and still computed server-side
+   * from the full match, so the first paint keeps its KPIs, facets, histogram
+   * and span; only the map dots wait for the snapshot.
+   *
+   * Absent or false means the collection is complete, which is what
+   * `/investigate` and any direct caller still get.
+   */
+  eventsDeferred?: boolean;
   totalMatched: number;
   /** null when nothing matched — an honest gap, not a fabricated "now" span. */
   span: { startMs: number; endMs: number; label: string; durationLabel: string } | null;
