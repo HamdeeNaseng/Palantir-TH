@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -50,7 +52,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="bg-void text-ink antialiased">{children}</body>
+      <body className="bg-void text-ink antialiased">
+        {children}
+        {/*
+          Field measurement, not lab measurement.
+
+          The `sin1` pin above it was set on the strength of one Vercel request
+          log and a probe run from a single machine. Speed Insights reports the
+          Core Web Vitals actual visitors record — so whether moving the
+          functions to Singapore helped the people this is built for is a
+          question with an answer, rather than an argument from where the
+          cluster sits. Analytics carries the page views those are a rate over.
+
+          Both are inert without the Vercel injection: off-platform (local dev,
+          a self-hosted build) they render nothing and send nothing, so neither
+          needs guarding behind an environment check. They are client
+          components in a server layout, which is why they sit here in the tree
+          rather than being wrapped.
+        */}
+        <SpeedInsights />
+        <Analytics />
+      </body>
     </html>
   );
 }
