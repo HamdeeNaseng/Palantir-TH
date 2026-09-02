@@ -142,9 +142,16 @@ out center tags;`;
 }
 
 /** Thai name preferred — it is what is written on the sign — English kept as a fallback. */
-function names(tags: Record<string, string>): { th: string | null; en: string | null } {
-  const th = tags["name:th"] ?? (/[฀-๿]/.test(tags.name ?? "") ? tags.name : null) ?? null;
-  const en = tags["name:en"] ?? (th && tags.name !== th ? (tags.name ?? null) : null) ?? null;
+function names(tags: Record<string, string | undefined>): { th: string | null; en: string | null } {
+  // `string | undefined`, not `string`: an OSM element carries whichever tags
+  // its mapper happened to add, so most of these keys are absent on most
+  // elements. Declaring the index as `string` made every `?? null` here read
+  // as dead code to the compiler while being the only thing keeping this
+  // function from returning `undefined` at runtime — TypeScript 7 started
+  // reporting that contradiction (TS2871), and the type was the wrong half.
+  const name = tags.name ?? null;
+  const th = tags["name:th"] ?? (name && /[฀-๿]/.test(name) ? name : null);
+  const en = tags["name:en"] ?? (th && name !== th ? name : null);
   return { th: th?.trim() || null, en: en?.trim() || null };
 }
 
