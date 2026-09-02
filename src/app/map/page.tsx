@@ -38,9 +38,18 @@ export default async function MapPage({
 
       {!data.live && (
         <p className="pointer-events-none fixed top-[calc(var(--nav-h)_+_8px)] left-1/2 z-50 max-w-[92vw] -translate-x-1/2 rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
-          ยังเชื่อมต่อ MongoDB ไม่ได้ — ให้รัน{" "}
-          <code className="font-mono">docker compose up -d</code> แล้ว{" "}
-          <code className="font-mono">npm run db:seed</code>
+          {/* Local-development instruction only — see the note in
+              InvestigateWorkspace. `live` is false for any failed read, so
+              naming the connection on a hosted deployment misdirects. */}
+          {process.env.NODE_ENV === "development" && !process.env.VERCEL ? (
+            <>
+              ยังเชื่อมต่อ MongoDB ไม่ได้ — ให้รัน{" "}
+              <code className="font-mono">docker compose up -d</code> แล้ว{" "}
+              <code className="font-mono">npm run db:seed</code>
+            </>
+          ) : (
+            <>ยังอ่านข้อมูลไม่ได้ในขณะนี้</>
+          )}
         </p>
       )}
 

@@ -60,10 +60,13 @@ export default function EventsWorkspace({
   initial,
   snapshotVersion,
   snapshotBuiltAtMs,
+  isLocalDev,
 }: {
   initial: EventsWorkspaceData;
   snapshotVersion: string;
   snapshotBuiltAtMs: number;
+  /** Decided on the server: `process.env` is not readable from here. */
+  isLocalDev: boolean;
 }) {
   // The server rendered `initial` for the URL's filters. From here on, every
   // filter change is answered from the snapshot in IndexedDB — same builder,
@@ -220,9 +223,20 @@ export default function EventsWorkspace({
       <main className="min-w-0 flex-1 bg-abyss p-2 lg:overflow-auto">
         {!data.live && (
           <p className="fixed top-[calc(var(--nav-h)_+_8px)] right-3 z-50 max-w-[92vw] rounded border border-amber/40 bg-[#211808]/95 px-3 py-1.5 text-[11px] text-amber shadow-lg">
-            กำลังแสดงสถานะไม่มีข้อมูล — ยังเชื่อมต่อ MongoDB ไม่ได้ ให้รัน{" "}
-            <code className="font-mono">docker compose up -d</code> แล้ว{" "}
-            <code className="font-mono">npm run db:seed</code>
+            {/* The docker hint is a local-development instruction, and naming
+                MongoDB at all is a guess: `live` is false for any failed read,
+                including a snapshot_cache that has never been built. Saying
+                "cannot connect" on a hosted deployment cost a full debugging
+                session chasing a connection that was answering in 280 ms. */}
+            {isLocalDev ? (
+              <>
+                กำลังแสดงสถานะไม่มีข้อมูล — ยังเชื่อมต่อ MongoDB ไม่ได้ ให้รัน{" "}
+                <code className="font-mono">docker compose up -d</code> แล้ว{" "}
+                <code className="font-mono">npm run db:seed</code>
+              </>
+            ) : (
+              <>กำลังแสดงสถานะไม่มีข้อมูล — ยังอ่านข้อมูลไม่ได้ในขณะนี้</>
+            )}
           </p>
         )}
 

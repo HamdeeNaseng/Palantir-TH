@@ -21,6 +21,7 @@ export default async function EventsPage({
 }) {
   const filters = parseFilters(await searchParams);
   const { data, snapshotVersion, snapshotBuiltAtMs } = await getEventsWorkspace(filters);
+  const isLocalDev = process.env.NODE_ENV === "development" && !process.env.VERCEL;
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-screen lg:min-w-[1180px] lg:overflow-hidden">
@@ -30,6 +31,7 @@ export default async function EventsPage({
           initial={data}
           snapshotVersion={snapshotVersion}
           snapshotBuiltAtMs={snapshotBuiltAtMs}
+          isLocalDev={isLocalDev}
         />
       </div>
     </div>

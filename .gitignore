@@ -52,3 +52,7 @@ client_secret_*.apps.googleusercontent.com.json
 !.agents/skills/agent-commit/
 !.agents/skills/citizen-geo-report/
 .env.production
+
+# Vercel CLI project link (`vercel link`). Contains the project/org ids and
+# is machine-local, like .env.local.
+.vercel
