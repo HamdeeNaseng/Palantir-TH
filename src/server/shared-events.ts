@@ -89,6 +89,49 @@ export interface RawBundle {
 }
 
 /**
+ * The `event_candidates` fields this bundle's three consumers actually read —
+ * `toSnapshot`, `getMapOverview` and `getMapEvents`, and nothing else.
+ *
+ * Applied at the server rather than in Node because the cost of this scan is
+ * transfer, not query: `event_candidates` is 30.6 MB across 10,300 documents
+ * (avgObjSize 2,969 B), and measured end to end it moves at ~94 KB/s from a
+ * function to the Atlas cluster — dead constant across runs, because the two
+ * are on opposite sides of the Pacific. 30 MB at that rate is 320 s, which is
+ * how a page with a 300 s ceiling returns HTTP 200 and then dies mid-stream.
+ *
+ * Fetching only these fields measured 6.63 MB and 70 s against the same
+ * cluster: 4.5x less data, 4.6x less time, exactly proportional. The 20.9% of
+ * every document taken by the `attributes` bag of upstream dataset columns is
+ * the largest single thing dropped, and nothing here has ever read it.
+ *
+ * Keep in sync with `toSnapshot` (src/server/snapshot.ts) and
+ * `toEventFeature` below: a field added there and forgotten here arrives as
+ * `undefined`, not as an error.
+ */
+const EVENT_PROJECTION = {
+  "event.type": 1,
+  "event.title": 1,
+  "location.provinceCode": 1,
+  "location.province": 1,
+  "location.district": 1,
+  "location.subdistrict": 1,
+  "location.geo": 1,
+  "location.geo_precision": 1,
+  "time.start": 1,
+  severity: 1,
+  confidence: 1,
+  verification: 1,
+  "casualties.killed": 1,
+  "casualties.injured": 1,
+  corroborating_sources: 1,
+  // Only ever read as `.length`, but the arrays are small next to what is
+  // being dropped and $size would cost an aggregation pipeline here.
+  media: 1,
+  actors: 1,
+  targets: 1,
+} as const;
+
+/**
  * Reads the document layers from MongoDB. An unavailable or unseeded database
  * returns an empty bundle; production must never silently substitute mock data.
  */
@@ -97,7 +140,10 @@ export async function loadBundle(): Promise<RawBundle> {
     const db = await getDb();
     const [sources, events, citizenReports, ingestionRuns, cases] = await Promise.all([
       db.collection<SourceRegistryDoc>(COLLECTIONS.sourceRegistry).find({}).toArray(),
-      db.collection<EventCandidateDoc>(COLLECTIONS.eventCandidates).find({}).toArray(),
+      db
+        .collection<EventCandidateDoc>(COLLECTIONS.eventCandidates)
+        .find({}, { projection: EVENT_PROJECTION })
+        .toArray(),
       db.collection<CitizenReportDoc>(COLLECTIONS.citizenReports).find({}).toArray(),
       db.collection<IngestionRunDoc>(COLLECTIONS.ingestionRuns).find({}).toArray(),
       db.collection<CaseDoc>(COLLECTIONS.cases).find({}).toArray(),

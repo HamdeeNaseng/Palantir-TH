@@ -62,6 +62,49 @@ const clientOptions = {
   socketTimeoutMS: 45_000,
 };
 
+/**
+ * The ceiling on a whole `connect()`, DNS included.
+ *
+ * None of the options above bound the first thing a `mongodb+srv://` connect
+ * does. The driver resolves the SRV and TXT records itself, before it builds
+ * the topology that `connectTimeoutMS` and `serverSelectionTimeoutMS` are
+ * handed to — see `resolveSRVRecord` in `mongodb/lib/connection_string.js`,
+ * where `retryDNSTimeoutFor` calls `dns.promises.resolve(host, 'SRV')` with no
+ * timeout at all and, worse, retries it once on `dns.TIMEOUT`. Node's resolver
+ * defaults to five attempts with exponential backoff, so a resolver that
+ * silently drops UDP responses stalls that call for minutes with every
+ * configured timeout untriggered. Re-checked against driver 7.6.0: the shape
+ * of the call changed from `resolveSrv(host)`, the missing timeout did not.
+ *
+ * This is a latent hazard rather than a diagnosis. The 300 s `/events` failure
+ * that prompted it was the cross-Pacific collection scan, not DNS — see the
+ * note on `preferredRegion` in `src/app/layout.tsx`. What makes it worth
+ * bounding anyway is the blast radius: `getClient()` memoises the pending
+ * promise, so one stalled lookup would pin every later request on that
+ * instance behind the same never-settling await, on every route.
+ *
+ * 12 s is `connectTimeoutMS` plus room for the DNS round trips that precede
+ * it. Exceeding it rejects, which is the outcome the rest of this file is
+ * already built for: `getClient()` evicts the memoised promise so the next
+ * request retries, and `loadBundle()` turns the rejection into an honest
+ * `live: false` in milliseconds instead of a five-minute hang.
+ */
+const CONNECT_BUDGET_MS = 12_000;
+
+/** `promise`, or a rejection once `ms` have passed — whichever comes first. */
+function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`[mongodb] ${label} exceeded ${ms}ms`)),
+      ms,
+    );
+    // Nothing should be kept alive purely by this timer.
+    timer.unref?.();
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var _palantirMongo: Promise<MongoClient> | undefined;
@@ -110,9 +153,29 @@ const isSrvDnsFailure = (err: unknown): boolean => {
  * a connect has already failed on SRV lookup with no reachable resolver — the
  * one case where the alternative is not "slower", it is "never connects".
  */
+/**
+ * One connect attempt, bounded by `CONNECT_BUDGET_MS`.
+ *
+ * Racing a deadline only stops *waiting* for the connect; it does not stop the
+ * connect. So the abandoned attempt is cleaned up on the way out — its
+ * rejection is swallowed (nothing is listening for it any more, and an
+ * unhandled rejection takes the whole function down on Node) and its client is
+ * closed, since a late success would otherwise leave an open pool that no
+ * reference reaches.
+ */
+function attempt(): Promise<MongoClient> {
+  const client = new MongoClient(uri, clientOptions);
+  const connecting = client.connect();
+  connecting.catch(() => {});
+  return withDeadline(connecting, CONNECT_BUDGET_MS, "connect").catch((err) => {
+    client.close().catch(() => {});
+    throw err;
+  });
+}
+
 async function connect(): Promise<MongoClient> {
   try {
-    return await new MongoClient(uri, clientOptions).connect();
+    return await attempt();
   } catch (err) {
     if (!isSrvDnsFailure(err) || !loopbackResolversOnly()) throw err;
     console.warn(
@@ -121,7 +184,7 @@ async function connect(): Promise<MongoClient> {
         "This is a local Node/Windows resolver fault, not an Atlas one.",
     );
     dns.setServers(["1.1.1.1", "8.8.8.8"]);
-    return new MongoClient(uri, clientOptions).connect();
+    return attempt();
   }
 }
 
