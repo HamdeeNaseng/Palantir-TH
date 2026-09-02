@@ -10,16 +10,22 @@ import { loadBundle, type RawBundle } from "./shared-events";
 /**
  * Builds the one payload the browser caches, and keeps it warm.
  *
- * Every page render used to call `loadBundle()` — a full scan of all 10,171
- * `event_candidates` documents — and every filter click was a page render. The
+ * Every page render used to call `loadBundle()` — a full scan of every
+ * `event_candidates` document — and every filter click was a page render. The
  * browser now holds the dataset and filters it locally (see `@/lib/snapshot`),
  * which leaves two jobs on this side: project the documents down to what the
  * view models read, and hand the same projection to both the server render and
  * `/api/snapshot`.
  *
- * The projection is not cosmetic. Raw documents serialise to 10.11 MB, most of
- * it the `attributes` bag of upstream dataset columns that nothing on either
- * page reads; projected it is 5.14 MB, 372 KB gzipped over the wire.
+ * The projection is not cosmetic, and it now happens twice. `loadBundle` asks
+ * MongoDB for only these fields (see `EVENT_PROJECTION`), which is what keeps
+ * the scan off the wire — 637 B/doc instead of 2,864. This second pass shapes
+ * what survives into the browser's copy.
+ *
+ * Measured against the production cluster, September 2026: 10,300 documents,
+ * 30.6 MB unprojected, 6.63 MB projected. Re-measure rather than trust these —
+ * the collection tripled in size since the figures that stood here before, and
+ * nothing failed loudly when it did.
  */
 
 /**
@@ -32,6 +38,23 @@ import { loadBundle, type RawBundle } from "./shared-events";
  * five minutes, which is the load the client-side cache exists to remove.
  */
 export const SNAPSHOT_TTL_MS = 60_000;
+
+/**
+ * How far past the TTL a snapshot may be served while its replacement builds.
+ *
+ * The TTL alone made every minute's first caller pay for the whole rebuild —
+ * a full scan of five collections, then a 5 MB stringify, a SHA-1, a gzip and
+ * a brotli — while a perfectly good sixty-second-old copy sat in memory. On a
+ * page that is also prefetched by the nav on every other page, that is a
+ * latency spike handed to whichever visitor happens to arrive on the boundary.
+ *
+ * So an expired-but-fresh-enough snapshot is served immediately and the
+ * rebuild runs behind it. The window is bounded rather than open-ended because
+ * `cached` is only replaced by a `live` build: without a ceiling, a MongoDB
+ * outage would keep serving ever-older data marked `live: true` instead of the
+ * honest empty state, and the outage would be invisible.
+ */
+const SNAPSHOT_MAX_STALE_MS = 10 * SNAPSHOT_TTL_MS;
 
 interface CachedSnapshot {
   snapshot: Snapshot;
@@ -198,7 +221,8 @@ async function build(previous: CachedSnapshot | null): Promise<CachedSnapshot> {
 }
 
 /**
- * The current snapshot, rebuilt at most once per `SNAPSHOT_TTL_MS`.
+ * The current snapshot, rebuilt at most once per `SNAPSHOT_TTL_MS`, and served
+ * stale while that rebuild runs — see `SNAPSHOT_MAX_STALE_MS`.
  *
  * A failed build is not cached: `loadBundle` already turns an unreachable
  * MongoDB into an honest empty bundle with `live: false`, and anything that
@@ -206,10 +230,25 @@ async function build(previous: CachedSnapshot | null): Promise<CachedSnapshot> {
  * a minute.
  */
 export async function getCachedSnapshot(): Promise<CachedSnapshot> {
-  if (cached && Date.now() - cached.checkedAtMs < SNAPSHOT_TTL_MS) return cached;
-  if (inFlight) return inFlight;
+  const age = cached ? Date.now() - cached.checkedAtMs : Infinity;
+  if (cached && age < SNAPSHOT_TTL_MS) return cached;
 
-  inFlight = build(cached)
+  const rebuilding = inFlight ?? startBuild();
+
+  // Expired, but not so old that serving it would hide an outage: hand back
+  // what we have and let the rebuild finish behind this request. The scan it
+  // runs is the single most expensive thing in the app, and there is no reason
+  // for whichever visitor happens to arrive on the TTL boundary to be the one
+  // who pays for it. A cold instance has no `cached` and still waits, which is
+  // correct — there is nothing else to show.
+  if (cached && age < SNAPSHOT_MAX_STALE_MS) return cached;
+
+  return rebuilding;
+}
+
+/** Starts a build and parks it in `inFlight`, so concurrent callers share it. */
+function startBuild(): Promise<CachedSnapshot> {
+  const started = build(cached)
     .then((next) => {
       // Never pin an outage for a whole TTL. `loadBundle` turns an unreachable
       // MongoDB into an empty bundle with `live: false`; serving that is right,
@@ -221,7 +260,16 @@ export async function getCachedSnapshot(): Promise<CachedSnapshot> {
       inFlight = null;
     });
 
-  return inFlight;
+  // A caller served a stale snapshot is not awaiting this one, so nothing is
+  // listening if it rejects — and an unhandled rejection ends the process.
+  // The failure is logged and dropped; `cached` keeps its previous value and
+  // the next request past the TTL starts a fresh build.
+  started.catch((err) => {
+    console.error("[snapshot] background rebuild failed:", err);
+  });
+
+  inFlight = started;
+  return started;
 }
 
 /** The snapshot itself — what server components render their first paint from. */
