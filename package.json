@@ -63,14 +63,14 @@
     "zod": "4.5.2"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.1.13",
     "@turf/simplify": "^7.4.0",
-    "@types/node": "26.4.0",
+    "@types/node": "26.4.1",
     "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0",
+    "@types/react-dom": "^19.2.7",
     "tailwindcss": "^4.1.13",
-    "tsx": "4.23.12",
+    "tsx": "4.23.13",
     "typescript": "7.0.2"
   },
   "allowScripts": {
